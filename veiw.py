@@ -136,7 +136,7 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     if not prep:
         return None
 
-   X, y = prep["X"], prep["y"]
+X, y = prep["X"], prep["y"]
 
 # 1) 모델이 학습될 때 사용한 변수 이름 기준으로 재인덱싱
 #    - pkl 안의 params.index 순서대로 컬럼 배치
