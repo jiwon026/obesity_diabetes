@@ -139,10 +139,10 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     X, y = prep["X"], prep["y"]
 
     # 모델이 학습될 때 사용한 변수 순서에 맞게 정렬 (이름 기반 정렬)
-    X_pred = X.reindex(columns=model.params.index, axis=1)
+    X_pred = X.loc[:, model.params.index]
 
     # 예측
-    y_prob = model.predict(X_pred)
+    y_prob = model.predict(X_pred))
     y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
     metrics = {
@@ -205,7 +205,7 @@ def predict_diabetes_risk_final(
     )
 
     # 모델이 학습될 때 사용한 컬럼 순서에 맞게 재정렬
-    new_data = new_data.reindex(columns=model.params.index, axis=1)
+    new_data = new_data.loc[:, model.params.index]
 
     # 3. 모델을 사용하여 당뇨병 확률 예측
     prediction_prob = model.predict(new_data)[0]
