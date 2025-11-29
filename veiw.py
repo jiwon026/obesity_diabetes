@@ -132,12 +132,15 @@ def prepare_adult_model_data(df):
 
     y = data["DIABETES"].astype(int)
     X = data.drop(columns=["DIABETES"])
-    X = sm.add_constant(X)
+    X = sm.add_constant(X)  # const 추가
     return {"X": X, "y": y, "columns": X.columns.tolist()}
 
 
-
 def compute_adult_model_results(dataframe: pd.DataFrame, model):
+    """
+    이미 학습된 로지스틱 회귀 모델(pkl에서 로드한 것)을 이용해서
+    성능 지표와 오즈비를 계산해서 반환합니다.
+    """
     if model is None:
         return None
 
@@ -147,8 +150,12 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
 
     X, y = prep["X"], prep["y"]
 
-    # 이름이 이미 model.params.index와 같으므로 그대로 사용
-    y_prob = model.predict(X)
+    # 🔥 모델이 학습될 때 사용한 변수 순서에 정확히 맞추기
+    #    (이거 안 맞으면 지금처럼 AUC가 박살남)
+    X_aligned = X.reindex(columns=model.params.index)
+
+    # 예측
+    y_prob = model.predict(X_aligned)
     y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
     metrics = {
@@ -168,7 +175,7 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
 
     results = {
         "metrics": metrics,
-            "odds_summary": coef_df.to_dict("index"),
+        "odds_summary": coef_df.to_dict("index"),
         "model_params": model.params.to_dict(),
         "model_cols": prep["columns"],
     }
@@ -196,22 +203,23 @@ def predict_diabetes_risk_final(
     # 1. BMI 계산 및 분류
     bmi, obe_level = classify_adult_obesity(height_cm, weight_kg)
 
-    # 2. 예측을 위한 DataFrame 생성
+    # 2. 학습 당시와 동일한 이름으로 DataFrame 생성
     new_data = pd.DataFrame({
-        'const': [1],
-        'AGE': [age],
-        'SEX': [sex],
-        'BMI': [bmi],
-        'SBP': [sbp],
-        'DBP': [dbp],
-        'HDL': [hdl],
-        'DM_FH': [dm_fh],
-        'BREAKFAST': [br_fq]
+        "const": [1],
+        "age": [age],
+        "sex": [sex],
+        "HE_BMI": [bmi],
+        "HE_sbp": [sbp],
+        "HE_dbp": [dbp],
+        "HE_HDL_st2": [hdl],
+        "DM_FH": [dm_fh],
+        "L_BR_FQ": [br_fq],
+        # HE_TG는 실시간 입력이 없으니 0으로 두고 싶으면 여기 추가 가능
+        # "HE_TG": [0.0],
     })
 
-    # 3. 모델이 학습될 때 사용한 컬럼 기준으로 재인덱싱
-    #    없는 컬럼은 0으로 채워서 모양 맞춰줌
-    new_data = new_data.reindex(columns=model.params.index).fillna(0)
+    # 3. 모델이 가진 파라미터 순서에 맞추기
+    new_data = new_data.reindex(columns=model.params.index)
 
     # 4. 예측
     prediction_prob = model.predict(new_data)[0]
