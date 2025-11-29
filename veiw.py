@@ -147,36 +147,11 @@ def compute_adult_model_results(dataframe: pd.DataFrame):
     return results
 
 @st.cache_resource
-def train_and_save_model(dataframe: pd.DataFrame):
-    """모델 객체 자체를 캐싱하고 반환 (파일 저장/로드 포함)"""
-    # 1. 파일이 이미 있으면 로드
-    if os.path.exists(MODEL_PATH):
-        try:
-            with open(MODEL_PATH, 'rb') as f:
-                model = pickle.load(f)
-            st.toast("✅ 학습된 모델 파일 로드 완료.", icon='🎉')
-            return model
-        except Exception as e:
-            st.warning(f"모델 파일 로드 실패: {e}. 새로 학습을 시작합니다.")
-
-    # 2. 파일이 없으면 학습 및 저장
-    prep = prepare_adult_model_data(dataframe)
-    if not prep: 
-        st.error("모델 학습을 위한 데이터 준비 실패.")
+def train_model_pure(X: pd.DataFrame, y: pd.Series):
+    """모델 학습만 수행하여 Model 객체를 반환합니다 (Side Effect 없음)."""
+    if X.empty or y.empty:
         return None
-    
-    X, y = prep["X"], prep["y"]
-    
     model = sm.Logit(y, X).fit(disp=False)
-    
-    # 모델 저장
-    try:
-        with open(MODEL_PATH, 'wb') as f:
-            pickle.dump(model, f)
-        st.toast(f"✅ 모델 학습 및 '{MODEL_PATH}' 파일 저장 완료.", icon='💾')
-    except Exception as e:
-        st.error(f"모델 파일 저장 실패: {e}. 예측은 가능하나 파일 저장은 안 됨.")
-        
     return model
 
 
