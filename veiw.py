@@ -145,31 +145,31 @@ X_pred = X.reindex(columns=model.params.index).fillna(0)
 
 # 2) 예측
 y_prob = model.predict(X_pred)
-    y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
+y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
-    metrics = {
-        "accuracy": accuracy_score(y, y_pred),
-        "recall": recall_score(y, y_pred, zero_division=0),
-        "precision": precision_score(y, y_pred, zero_division=0),
-        "f1": f1_score(y, y_pred),
-        "auc": roc_auc_score(y, y_prob),
-        "threshold": ADULT_MODEL_THRESHOLD,
-        "sample_size": len(y),
-    }
+metrics = {
+    "accuracy": accuracy_score(y, y_pred),
+    "recall": recall_score(y, y_pred, zero_division=0),
+    "precision": precision_score(y, y_pred, zero_division=0),
+    "f1": f1_score(y, y_pred),
+    "auc": roc_auc_score(y, y_prob),
+    "threshold": ADULT_MODEL_THRESHOLD,
+    "sample_size": len(y),
+}
 
-    # 오즈비 및 계수 (로드된 모델 기준)
-    odds_ratios = np.exp(model.params)
-    coef_df = pd.DataFrame(
-        {"Coef": model.params, "OR": odds_ratios, "P-value": model.pvalues}
-    )
+# 오즈비 및 계수 (로드된 모델 기준)
+odds_ratios = np.exp(model.params)
+coef_df = pd.DataFrame(
+    {"Coef": model.params, "OR": odds_ratios, "P-value": model.pvalues}
+)
 
-    results = {
-        "metrics": metrics,
-        "odds_summary": coef_df.to_dict("index"),
-        "model_params": model.params.to_dict(),
-        "model_cols": prep["columns"],
-    }
-    return results
+results = {
+    "metrics": metrics,
+    "odds_summary": coef_df.to_dict("index"),
+    "model_params": model.params.to_dict(),
+    "model_cols": prep["columns"],
+}
+return results
 
 
 def predict_diabetes_risk_final(
