@@ -207,6 +207,21 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
         "threshold": float(best_t),
         "sample_size": len(y),
     }
+    # ROC curve 좌표 계산
+    fpr, tpr, roc_thresholds = roc_curve(y, y_prob)
+    
+    results = {
+        "metrics": metrics,
+        "odds_summary": coef_df.to_dict("index"),
+        "model_params": model.params.to_dict(),
+        "model_cols": prep["columns"],
+        "roc_curve": {           # 👈 ROC 좌표도 같이 저장
+            "fpr": fpr.tolist(),
+            "tpr": tpr.tolist(),
+            "thresholds": roc_thresholds.tolist(),
+        },
+    }
+    return results
 
     # 오즈비 및 계수
     odds_ratios = np.exp(model.params)
@@ -1076,7 +1091,7 @@ with tab3:
                     xref="paper",
                     yref="paper",
                     xanchor="right",
-                    yanchor="bottom",
+                    yanchor="Top",
                     showarrow=False,
                     text=eq_text,
                     font=dict(size=9),
@@ -1261,6 +1276,57 @@ with tab6:
             c4.metric("F1-Score", f"{metrics['f1']*100:.1f}%")
             c5.metric("AUC-ROC", f"{metrics['auc']:.3f}")
             st.caption(f"학습 표본 수: {metrics['sample_size']:,}건")
+
+            # =========================
+            # 📉 ROC Curve 시각화 추가
+            # =========================
+            if adult_model_results_global and "roc_curve" in adult_model_results_global:
+                roc_info = adult_model_results_global["roc_curve"]
+                fpr = np.array(roc_info["fpr"])
+                tpr = np.array(roc_info["tpr"])
+
+                roc_fig = go.Figure()
+
+                # 모델 ROC 곡선
+                roc_fig.add_trace(
+                    go.Scatter(
+                        x=fpr,
+                        y=tpr,
+                        mode="lines",
+                        name=f"ROC (AUC = {metrics['auc']:.3f})",
+                        line=dict(width=3, color="firebrick"),
+                    )
+                )
+
+                # 무작위 분류 기준선 (대각선)
+                roc_fig.add_trace(
+                    go.Scatter(
+                        x=[0, 1],
+                        y=[0, 1],
+                        mode="lines",
+                        name="무작위 분류",
+                        line=dict(width=2, dash="dash", color="gray"),
+                        showlegend=True,
+                    )
+                )
+
+                roc_fig.update_layout(
+                    title="ROC Curve (민감도-1-특이도)",
+                    xaxis_title="1 - 특이도 (False Positive Rate)",
+                    yaxis_title="민감도 (True Positive Rate)",
+                    xaxis=dict(range=[0, 1]),
+                    yaxis=dict(range=[0, 1]),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1,
+                    ),
+                    height=450,
+                )
+
+                st.plotly_chart(roc_fig, use_container_width=True)
 
             st.markdown("---")
             st.subheader("📊 주요 위험 요인 오즈비 (Odds Ratio)")
