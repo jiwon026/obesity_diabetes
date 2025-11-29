@@ -1348,47 +1348,68 @@ with tab6:
                 odds_df = odds_df.sort_values("오즈비(OR)", ascending=False)
                 st.dataframe(odds_df, use_container_width=True)
                 # =============================
-                # 🔍 오즈비(OR) 상위 4–5개 시각화
+                # 🎯 오즈비(OR) 상위 4~5개 인포그래픽 스타일 시각화
                 # =============================
-                # OR이 1보다 큰(위험을 높이는) 요인 중에서 상위 5개 선택
                 or_df = odds_df.copy()
-                or_df_pos = or_df[or_df["오즈비(OR)"] > 1]
             
-                if len(or_df_pos) == 0:
-                    st.info("오즈비가 1을 초과하는 위험 요인이 없어 상위 요인을 시각화할 수 없습니다.")
-                else:
-                    top_k = min(5, len(or_df_pos))
-                    top_or = (
-                        or_df_pos.sort_values("오즈비(OR)", ascending=False)
-                        .head(top_k)
-                        .reset_index()
-                        .rename(columns={"index": "변수"})
+                # OR과 1 사이의 거리(로그 스케일)로 "영향력" 정렬
+                or_df["log_dist"] = (np.log(or_df["오즈비(OR)"]).abs())
+            
+                # 상위 5개만 사용 (4개만 원하면 head(4)로 바꿔도 됨)
+                top_k = min(5, len(or_df))
+                top_or = (
+                    or_df.sort_values("log_dist", ascending=False)
+                    .head(top_k)
+                    .reset_index()
+                    .rename(columns={"index": "변수"})
+                )
+            
+                # 증가/감소 방향, 색, 표시 텍스트 만들기
+                top_or["direction"] = np.where(top_or["오즈비(OR)"] >= 1, "증가", "감소")
+                top_or["color"] = np.where(top_or["오즈비(OR)"] >= 1, "#ff4d4d", "#2979ff")
+            
+                # 멀티라인 텍스트 (Plotly는 <br>로 줄바꿈)
+                top_or["label_text"] = top_or.apply(
+                    lambda r: f"당뇨병<br>위험<br>{r['오즈비(OR)']:.2f}배<br>{r['direction']}",
+                    axis=1,
+                )
+            
+                # 그래프 생성
+                fig_or = go.Figure()
+            
+                fig_or.add_trace(
+                    go.Bar(
+                        x=top_or["변수"],
+                        y=top_or["오즈비(OR)"],
+                        marker_color=top_or["color"],
+                        text=top_or["label_text"],
+                        textposition="inside",
+                        insidetextanchor="middle",
                     )
+                )
             
-                    # 텍스트용 반올림
-                    top_or["표시_OR"] = top_or["오즈비(OR)"].round(2)
+                # 기준선 OR = 1.0
+                fig_or.add_hline(
+                    y=1.0,
+                    line_dash="dash",
+                    line_color="gray",
+                    annotation_text="기준 (OR = 1.0)",
+                    annotation_position="top right",
+                )
             
-                    fig_or = px.bar(
-                        top_or,
-                        x="오즈비(OR)",
-                        y="변수",
-                        orientation="h",
-                        text="표시_OR",
-                        title=f"오즈비(OR) 상위 {top_k} 주요 위험 요인",
-                        color="오즈비(OR)",
-                        color_continuous_scale="Reds",
-                    )
+                # 레이아웃 꾸미기
+                max_or = float(top_or["오즈비(OR)"].max())
+                fig_or.update_layout(
+                    title=f"주요 변수별 당뇨병 위험 오즈비 (상위 {top_k}개)",
+                    xaxis_title="변수",
+                    yaxis_title="오즈비(OR)",
+                    yaxis=dict(range=[0, max_or * 1.2]),
+                    margin=dict(t=60, b=40, l=40, r=20),
+                    showlegend=False,
+                )
             
-                    fig_or.update_layout(
-                        xaxis_title="오즈비(OR)",
-                        yaxis_title="",
-                        coloraxis_showscale=False,
-                        margin=dict(l=20, r=20, t=60, b=20),
-                    )
-                    fig_or.update_traces(textposition="outside")
-            
-                    st.plotly_chart(fig_or, use_container_width=True)
-                    st.caption("※ 오즈비(OR) > 1 인 요인 중에서 상위 4–5개만 표시했습니다.")
+                st.plotly_chart(fig_or, use_container_width=True)
+
 
         else:
             st.warning(
