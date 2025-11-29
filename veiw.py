@@ -1649,214 +1649,180 @@ with tab6:
                 "성인 모델 학습에 필요한 데이터(DIABETES, SBP, HDL 등)가 부족하거나 누락되었습니다."
             )
     else:
-        # ============================
-        # 👦 청소년 비만 예측 모델 성능
-        # ============================
-        st.header("👦 청소년 비만 예측 모델 성능")
+        # ==============================
+        # ✅ 청소년 비만 예측 모델 성능
+        # ==============================
+        st.header("🧑‍🎓 청소년 비만 예측 모델 성능")
 
         if teen_model_summary_global is None:
-            st.info(
-                "미리 계산된 청소년 모델 결과 파일(teen_model_results.json)을 "
-                "찾을 수 없거나 'logistic' 결과가 없습니다."
-            )
-
+            st.warning("청소년 모델 결과(teen_model_results.json)를 찾을 수 없습니다. 먼저 precompute_teen_model_result.py를 실행해서 결과 파일을 생성해주세요.")
         else:
-            # --- 1) 성능 지표 꺼내기 ---
-            summary = teen_model_summary_global
+            teen_metrics = teen_model_summary_global  # precompute에서 logistic 부분
 
-            # logistic 안에 metrics가 있을 수도, summary 자체가 metrics일 수도 있음
-            if isinstance(summary, dict) and "metrics" in summary:
-                metrics = summary["metrics"]
-            else:
-                metrics = summary
-
-            acc = metrics.get("accuracy")
-            rec = metrics.get("recall")
-            prec = metrics.get("precision")
-            f1 = metrics.get("f1")
-            auc = (
-                metrics.get("auc")
-                or metrics.get("roc_auc")
-                or metrics.get("auroc")
-            )
-            thr = metrics.get("threshold") or metrics.get("cutoff")
-            n_sample = metrics.get("sample_size")
-
+            # 1) 기본 설명
             st.markdown(
-                f"""
-- **모델**: Logistic Regression (청소년 비만 상위 5% 예측용)  
-- **라벨 기준**: BMI 상위 5% (TEEN_OBESE_TOP5 = 1)  
-- **적용 임계값 (F1 기준 최적화)**: `{thr:.3f}`  
                 """
-                if thr is not None
-                else """
-- **모델**: Logistic Regression (청소년 비만 상위 5% 예측용)  
-- **라벨 기준**: BMI 상위 5% (TEEN_OBESE_TOP5 = 1)  
-- **적용 임계값**: (정보 없음)
+                - **모델**: Logistic Regression (scikit-learn)  
+                - **라벨 기준**: 상위 5% BMI (TEEN_OBESE_TOP5=1)  
+                - **적용 임계값**: `best_thr` (튜닝된 임계값)
                 """
             )
 
-            # --- 1-1) 바 차트용 DF ---
-            rows = []
-            if acc is not None:
-                rows.append({"지표": "Accuracy", "값": acc})
-            if rec is not None:
-                rows.append({"지표": "Recall", "값": rec})
-            if prec is not None:
-                rows.append({"지표": "Precision", "값": prec})
-            if f1 is not None:
-                rows.append({"지표": "F1-Score", "값": f1})
-            if auc is not None:
-                rows.append({"지표": "AUC-ROC", "값": auc})
+            # 2) 지표 요약 (위에 숫자 4개 + AUC)
+            col1, col2, col3, col4, col5 = st.columns(5)
+            col1.metric("Accuracy", f"{teen_metrics['accuracy']*100:.1f}%")
+            col2.metric("Recall", f"{teen_metrics['recall']*100:.1f}%")
+            col3.metric("Precision", f"{teen_metrics['precision']*100:.1f}%")
+            col4.metric("F1-Score", f"{teen_metrics['f1']*100:.1f}%")
+            col5.metric("AUC-ROC", f"{teen_metrics['auc']:.3f}")
 
-            if rows:
-                teen_metric_df = pd.DataFrame(rows)
-                fig = px.bar(
-                    teen_metric_df,
-                    x="지표",
-                    y="값",
-                    title="청소년 모델 성능 지표",
-                    color="지표",
-                    color_discrete_sequence=px.colors.qualitative.Set2,
+            st.caption(f"학습 표본 수: {teen_metrics.get('sample_size', 0):,}건, 사용 임계값: {teen_metrics.get('threshold', TEEN_MODEL_THRESHOLD):.3f}")
+            st.markdown("---")
+
+            # =================================================
+            # 3) ROC 커브 (청소년 모델)
+            # =================================================
+            st.subheader("📈 ROC 곡선 (청소년 비만 예측 모델)")
+
+            roc_info = teen_metrics.get("roc_curve", {})
+            fpr = roc_info.get("fpr", [])
+            tpr = roc_info.get("tpr", [])
+            auc_teen = teen_metrics.get("auc", None)
+
+            if fpr and tpr:
+                fig_roc = go.Figure()
+
+                # 실제 ROC 곡선
+                fig_roc.add_trace(
+                    go.Scatter(
+                        x=fpr,
+                        y=tpr,
+                        mode="lines",
+                        name=f"ROC (AUC = {auc_teen:.3f})",
+                    )
                 )
-                fig.update_yaxes(range=[0, 1])
-                st.plotly_chart(fig, use_container_width=True)
-
-            # --- 1-2) KPI 카드 ---
-            col1, col2, col3 = st.columns(3)
-            if acc is not None:
-                col1.metric("Accuracy", f"{acc*100:.1f}%")
-            if rec is not None:
-                col2.metric("Recall", f"{rec*100:.1f}%")
-            if prec is not None:
-                col3.metric("Precision", f"{prec*100:.1f}%")
-
-            col4, col5 = st.columns(2)
-            if f1 is not None:
-                col4.metric("F1-Score", f"{f1*100:.1f}%")
-            if auc is not None:
-                col5.metric("AUC-ROC", f"{auc:.3f}")
-
-            if n_sample is not None:
-                st.caption(f"학습 표본 수: {int(n_sample):,}건")
-
-            st.markdown("---")
-
-            # ======================
-            # 2) ROC 커브 그리기
-            # ======================
-            roc_source = None
-
-            # logistic 안에서 roc 관련 키 찾기
-            if isinstance(summary, dict):
-                if "roc_curve" in summary:
-                    roc_source = summary["roc_curve"]
-                else:
-                    # 이름이 애매하게 들어간 경우(예: 'roc' 포함)
-                    for k, v in summary.items():
-                        if isinstance(k, str) and "roc" in k.lower():
-                            roc_source = v
-                            break
-
-            # logistic 바깥에서 roc_* 찾기
-            if roc_source is None and isinstance(teen_model_results_global, dict):
-                for k, v in teen_model_results_global.items():
-                    if isinstance(k, str) and "roc" in k.lower():
-                        roc_source = v
-                        break
-
-            if roc_source is not None:
-                fpr = np.array(roc_source.get("fpr", []), dtype=float)
-                tpr = np.array(roc_source.get("tpr", []), dtype=float)
-
-                if fpr.size > 0 and tpr.size > 0:
-                    fig_roc = go.Figure()
-                    fig_roc.add_trace(
-                        go.Scatter(
-                            x=fpr,
-                            y=tpr,
-                            mode="lines",
-                            name="ROC 곡선",
-                        )
+                # 기준선 (무작위 분류기)
+                fig_roc.add_trace(
+                    go.Scatter(
+                        x=[0, 1],
+                        y=[0, 1],
+                        mode="lines",
+                        name="무작위 분류기 (AUC = 0.5)",
+                        line=dict(dash="dash", color="gray"),
                     )
-                    fig_roc.add_trace(
-                        go.Scatter(
-                            x=[0, 1],
-                            y=[0, 1],
-                            mode="lines",
-                            name="무작위 기준선",
-                            line=dict(dash="dash"),
-                        )
-                    )
-                    fig_roc.update_layout(
-                        title="청소년 모델 ROC 곡선",
-                        xaxis_title="1 - Specificity (FPR)",
-                        yaxis_title="Sensitivity (TPR)",
-                        xaxis=dict(range=[0, 1]),
-                        yaxis=dict(range=[0, 1]),
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=-0.2,
-                            xanchor="center",
-                            x=0.5,
-                        ),
-                    )
-                    st.plotly_chart(fig_roc, use_container_width=True)
-                else:
-                    st.info("teen_model_results에서 ROC 좌표(fpr/tpr)를 찾지 못했습니다.")
+                )
+
+                fig_roc.update_layout(
+                    xaxis_title="1 - 특이도 (False Positive Rate)",
+                    yaxis_title="민감도 (True Positive Rate)",
+                    title="청소년 비만 예측 모델 ROC 곡선",
+                    xaxis=dict(range=[0, 1]),
+                    yaxis=dict(range=[0, 1]),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                    margin=dict(l=40, r=20, t=60, b=60),
+                )
+
+                st.plotly_chart(fig_roc, use_container_width=True)
             else:
-                st.info("청소년 모델 ROC 정보(roc_curve)가 JSON에 포함되어 있지 않습니다.")
+                st.info("ROC 곡선 정보가 teen_model_results.json에 없습니다.")
 
             st.markdown("---")
 
-            # ======================
-            # 3) 오즈비(OR) 시각화
-            # ======================
-            # teen_model_summary_global 사용 중인 곳 안에서
+            # =================================================
+            # 4) 오즈비(OR) 상위 5개 시각화
+            # =================================================
+            st.subheader("🔍 주요 변수별 비만 위험 오즈비 (상위 5개)")
 
-            top_feats = None
-            if isinstance(summary, dict):
-                # teen_model_results.json 안에 "top_features"로 넣어두었다고 가정
-                top_feats = summary.get("top_features")
-            
-            if top_feats:
-                odds_df = pd.DataFrame(top_feats)
-                # '피처', '오즈비' 컬럼이 이미 있으니 바로 막대 그래프
-                odds_df = odds_df.sort_values("오즈비", ascending=False)
-            
-                colors = ["#e57373" if v > 1 else "#64b5f6" for v in odds_df["오즈비"]]
-                texts = [
-                    f"위험 {v:.2f}배 증가" if v > 1 else f"위험 {v:.2f}배 감소"
-                    for v in odds_df["오즈비"]
+            odds_source = teen_metrics.get("odds_summary", None)
+            if odds_source:
+                # odds_source: {변수명: {"Coef": .., "OR": ..}}
+                odds_df = pd.DataFrame(odds_source).T
+
+                # 필요 컬럼만 사용 & 이름 정리
+                odds_df = odds_df.rename(columns={"Coef": "coef", "OR": "or"})
+                odds_df = odds_df[["coef", "or"]].copy()
+
+                # 변수 한글 라벨 매핑 (원하는 것만 추가로 바꿔줘도 됨)
+                label_map = {
+                    "F_BR": "아침 식사 빈도",
+                    "F_FRUIT": "과일 섭취 빈도",
+                    "F_VEG": "채소 섭취 빈도",
+                    "F_FASTFOOD": "패스트푸드 섭취",
+                    "SODA_INTAKE": "탄산음료 섭취",
+                    "Breakfast_Category": "아침식사 점수",
+                    "AGE": "나이",
+                    "SEX": "성별(남=1, 여=2)",
+                    "E_SES": "사회경제수준",
+                    "HEALTHY_SCORE": "건강 식습관 점수",
+                    "UNHEALTHY_SCORE": "불건강 식습관 점수",
+                    "NET_DIET_SCORE": "순 식습관 점수",
+                }
+
+                odds_df["변수"] = [
+                    label_map.get(idx, idx) for idx in odds_df.index
                 ]
-            
+
+                # OR 기준으로 영향이 큰 순서(1에서 얼마나 떨어져 있는지)
+                odds_df["영향도"] = (odds_df["or"] - 1).abs()
+                odds_df_top = odds_df.sort_values("영향도", ascending=False).head(5)
+
+                # 해석용 텍스트
+                def make_text(or_val):
+                    if or_val > 1:
+                        return f"비만 위험 {or_val:.2f}배 증가"
+                    elif or_val < 1:
+                        return f"비만 위험 {1/or_val:.2f}배 감소"
+                    else:
+                        return "영향 없음"
+
+                odds_df_top["해석"] = odds_df_top["or"].apply(make_text)
+
+                # 막대 색: OR>1 빨간색, OR<=1 파란색
+                colors = ["#ff6b6b" if v > 1 else "#4da3ff" for v in odds_df_top["or"]]
+
                 fig_or = go.Figure()
                 fig_or.add_trace(
                     go.Bar(
-                        x=odds_df["피처"],
-                        y=odds_df["오즈비"],
+                        x=odds_df_top["변수"],
+                        y=odds_df_top["or"],
                         marker_color=colors,
-                        text=texts,
-                        textposition="outside",
+                        text=[
+                            f"{row['해석']}"
+                            for _, row in odds_df_top.iterrows()
+                        ],
+                        textposition="inside",
+                        textfont=dict(color="white", size=11),
                     )
                 )
+
+                # 기준선 OR=1
                 fig_or.add_hline(
                     y=1.0,
                     line_dash="dash",
                     line_color="gray",
-                    annotation_text="기준선 (OR=1.0)",
-                    annotation_position="top right",
                 )
-                fig_or.update_layout(
-                    title="청소년 모델 주요 변수별 비만 위험 오즈비",
-                    yaxis_title="오즈비 (OR)",
-                    xaxis_title="변수",
-                )
-                st.plotly_chart(fig_or, use_container_width=True)
-            else:
-                st.info("청소년 모델의 오즈비(top_features) 정보가 JSON에 없습니다.")
 
+                fig_or.update_layout(
+                    title="주요 변수별 청소년 비만 위험 오즈비 (상위 5개)",
+                    xaxis_title="변수",
+                    yaxis_title="오즈비 (OR)",
+                    yaxis=dict(range=[0, max(odds_df_top["or"]) * 1.2]),
+                    showlegend=False,
+                    margin=dict(l=40, r=20, t=60, b=80),
+                )
+
+                st.plotly_chart(fig_or, use_container_width=True)
+
+                # 아래에 표 형태로도 한번 보여주기 (선택)
+                st.dataframe(
+                    odds_df_top[["변수", "or", "해석"]].rename(
+                        columns={"or": "오즈비(OR)"}
+                    ),
+                    use_container_width=True,
+                )
+
+            else:
+                st.info("청소년 로지스틱 회귀의 오즈비 정보(odds_summary)를 찾을 수 없습니다.")
 
 
 # ---------------- 탭 7: 성인 예측 ----------------
