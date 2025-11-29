@@ -17,33 +17,42 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 import statsmodels.api as sm
-import pickle  # 모델 저장/로드 라이브러리 추가
+import pickle
 
 # ====== 전역 상수 ======
 TEEN_EXCLUDED_YEARS = {2015, 2016}
 TEEN_OBESITY_PERCENTILE = 0.95
 TEEN_MODEL_THRESHOLD = 0.49
-ADULT_MODEL_THRESHOLD = 0.1667  # F1 최적화 임계값
-ADULT_DEFAULT_HDL = 53.50  # 평균 HDL-C 값
-# === PKL 로드 (모델 + threshold + columns) ===
+ADULT_MODEL_THRESHOLD = 0.1667  # 기본값(이후에 덮어씀)
+ADULT_DEFAULT_HDL = 53.50
+MODEL_PATH = "logit_model.pkl"
+
+# ======================================================================
+# 🔐 pkl에서 모델 + threshold + columns 로드
+# ======================================================================
 try:
-    with open("logit_model.pkl", "rb") as f:
+    with open(MODEL_PATH, "rb") as f:
         loaded = pickle.load(f)
 
-    logit_model = loaded["model"]
-    ADULT_MODEL_THRESHOLD = loaded["threshold"]
-    TRAIN_COLUMNS = loaded["columns"]
-
+    # pkl 을 {"model":..., "threshold":..., "columns":[...]} 형태로 저장해두었다고 가정
+    if isinstance(loaded, dict):
+        logit_model = loaded.get("model", None)
+        ADULT_MODEL_THRESHOLD = loaded.get("threshold", ADULT_MODEL_THRESHOLD)
+        TRAIN_COLUMNS = loaded.get("columns", [])
+    else:
+        # 옛날 방식(pure model)으로 저장된 경우
+        logit_model = loaded
+        TRAIN_COLUMNS = []
+    if logit_model is None:
+        st.error("로지스틱 회귀 모델을 pkl에서 제대로 불러오지 못했습니다.")
 except Exception as e:
     st.error(f"[ERROR] 모델 로드 실패: {e}")
     logit_model = None
-    ADULT_MODEL_THRESHOLD = 0.5
     TRAIN_COLUMNS = []
 
-
-# ==============================================================================
-# 📝 모델 로드 및 준비 함수 (Model Persistence Logic)
-# ==============================================================================
+# ======================================================================
+# 📝 공통 함수
+# ======================================================================
 
 
 def load_teen_model_results_from_file(path: str = "teen_model_results.json"):
@@ -56,9 +65,6 @@ def load_teen_model_results_from_file(path: str = "teen_model_results.json"):
         return data
     except Exception:
         return None
-
-
-
 
 
 def classify_adult_obesity(height_cm, weight_kg):
@@ -105,8 +111,11 @@ def get_br_fq_select_options():
     }
 
 
-def prepare_adult_model_data(df):
-    # pkl 모델 학습 시 사용한 컬럼 기준
+def prepare_adult_model_data(df: pd.DataFrame):
+    """
+    pkl 모델 학습 시 사용한 변수 이름에 맞춰 데이터 준비
+    (DIABETES + age, sex, HE_BMI, HE_sbp, HE_dbp, HE_TG, HE_HDL_st2, DM_FH, L_BR_FQ)
+    """
     req = [
         "DIABETES",
         "age",
@@ -132,6 +141,33 @@ def prepare_adult_model_data(df):
     return {"X": X, "y": y, "columns": X.columns.tolist()}
 
 
+def find_best_threshold(y_true, y_prob, metric: str = "f1"):
+    """
+    y_prob(확률)에 대해 0.01~0.99 범위에서 임계값을 바꿔가며
+    F1(또는 다른 metric)이 최대가 되는 threshold를 찾음.
+    """
+    best_t = 0.5
+    best_score = -1.0
+
+    for t in np.linspace(0.01, 0.99, 99):
+        y_pred = (y_prob >= t).astype(int)
+
+        if metric == "f1":
+            score = f1_score(y_true, y_pred, zero_division=0)
+        elif metric == "recall":
+            score = recall_score(y_true, y_pred, zero_division=0)
+        elif metric == "precision":
+            score = precision_score(y_true, y_pred, zero_division=0)
+        else:
+            score = f1_score(y_true, y_pred, zero_division=0)
+
+        if score > best_score:
+            best_score = score
+            best_t = t
+
+    return best_t, best_score
+
+
 def compute_adult_model_results(dataframe: pd.DataFrame, model):
     """
     이미 학습된 로지스틱 회귀 모델(pkl에서 로드한 것)을 이용해서
@@ -146,25 +182,33 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
 
     X, y = prep["X"], prep["y"]
 
-    # 🔥 모델이 학습될 때 사용한 변수 순서에 맞추고,
-    #    없는 컬럼이 생기면 0으로 채워서 NaN이 안 생기게 함
-    X_aligned = X.reindex(columns=TRAIN_COLUMNS).fillna(0)
+    # 학습 시 사용된 컬럼 순서(TRAIN_COLUMNS)에 맞게 정렬
+    if TRAIN_COLUMNS:
+        X_aligned = X.reindex(columns=TRAIN_COLUMNS).fillna(0)
+    else:
+        # pkl에 columns 정보가 없다면 model.params 기준으로라도 맞추기
+        X_aligned = X.reindex(columns=model.params.index).fillna(0)
 
-    # 예측
-    y_prob = logit_model.predict(X_aligned)
-    y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
+    # 확률 예측
+    y_prob = model.predict(X_aligned)
+
+    # F1 기준 최적 임계값 탐색
+    best_t, best_f1 = find_best_threshold(y, y_prob, metric="f1")
+
+    # 최종 예측
+    y_pred = (y_prob >= best_t).astype(int)
 
     metrics = {
         "accuracy": accuracy_score(y, y_pred),
         "recall": recall_score(y, y_pred, zero_division=0),
         "precision": precision_score(y, y_pred, zero_division=0),
-        "f1": f1_score(y, y_pred),
+        "f1": best_f1,
         "auc": roc_auc_score(y, y_prob),
-        "threshold": ADULT_MODEL_THRESHOLD,
+        "threshold": float(best_t),
         "sample_size": len(y),
     }
 
-
+    # 오즈비 및 계수
     odds_ratios = np.exp(model.params)
     coef_df = pd.DataFrame(
         {"Coef": model.params, "OR": odds_ratios, "P-value": model.pvalues}
@@ -177,8 +221,6 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
         "model_cols": prep["columns"],
     }
     return results
-
-
 
 
 def predict_diabetes_risk_final(
@@ -194,37 +236,42 @@ def predict_diabetes_risk_final(
     hdl=ADULT_DEFAULT_HDL,
 ):
     """
-    최종 간소화 모델 (상호작용항 없음)을 사용하여 당뇨병 위험을 예측합니다.
+    최종 간소화 모델을 사용하여 당뇨병 위험을 예측합니다.
+    학습 시 사용한 변수 이름에 맞춰 입력을 구성합니다.
     """
 
     # 1. BMI 계산 및 분류
     bmi, obe_level = classify_adult_obesity(height_cm, weight_kg)
 
     # 2. 학습 당시와 동일한 이름으로 DataFrame 생성
-    new_data = pd.DataFrame({
-        "const": [1],
-        "age": [age],
-        "sex": [sex],
-        "HE_BMI": [bmi],
-        "HE_sbp": [sbp],
-        "HE_dbp": [dbp],
-        "HE_HDL_st2": [hdl],
-        "DM_FH": [dm_fh],
-        "L_BR_FQ": [br_fq],
-        # HE_TG는 실시간 입력이 없으니 0으로 두고 싶으면 여기 추가 가능
-        # "HE_TG": [0.0],
-    })
+    new_data = pd.DataFrame(
+        {
+            "const": [1.0],
+            "age": [age],
+            "sex": [sex],
+            "HE_BMI": [bmi],
+            "HE_sbp": [sbp],
+            "HE_dbp": [dbp],
+            "HE_TG": [0.0],  # 실시간 TG 정보가 없다면 0으로 둠
+            "HE_HDL_st2": [hdl],
+            "DM_FH": [dm_fh],
+            "L_BR_FQ": [br_fq],
+        }
+    )
 
-    # 3. 모델이 가진 파라미터 순서에 맞추기
-    new_data = new_data.reindex(columns=TRAIN_COLUMNS).fillna(0)
+    # 3. 컬럼 순서 맞추기
+    if TRAIN_COLUMNS:
+        new_data = new_data.reindex(columns=TRAIN_COLUMNS).fillna(0)
+    else:
+        new_data = new_data.reindex(columns=model.params.index).fillna(0)
 
     # 4. 예측
-    prediction_prob = logit_model.predict(new_data)[0]
+    prediction_prob = model.predict(new_data)[0]
 
     return bmi, obe_level, prediction_prob, hdl
 
 
-# ⚠️ 청소년 모델 학습 로직은 여기서 생략되었습니다.
+# 청소년용 더미 함수
 def prepare_teen_model_data(dataframe: pd.DataFrame) -> Optional[Dict[str, np.ndarray]]:
     return None
 
@@ -233,11 +280,11 @@ def compute_teen_model_results(dataframe: pd.DataFrame):
     return None
 
 
-# ==============================================================================
-# 🚀 메인 실행 및 Streamlit 로직
-# ==============================================================================
+# ======================================================================
+# 🔄 데이터 로드
+# ======================================================================
 
-# 데이터 로드
+
 @st.cache_data
 def load_data():
     try:
@@ -256,7 +303,7 @@ def load_new_data():
     except FileNotFoundError:
         return pd.DataFrame()
 
-    # 1) 분석/대시보드용 한글/대문자 컬럼명으로 매핑
+    # 1) 대시보드용 한글/대문자 컬럼명으로 매핑
     df_new = df_new.rename(
         columns={
             "year": "YEAR",
@@ -292,9 +339,16 @@ def load_new_data():
     if "BMI" in df_new.columns and "AGE" in df_new.columns:
         df_new["BMI_Age_Int"] = df_new["BMI"] * df_new["AGE"]
 
-    # 4) ✅ pkl 모델이 학습될 때 사용한 "원래 이름" 컬럼들도 다시 만들어주기
-    #    (모델은 이 이름들을 기준으로 coef들을 가지고 있음)
-    if {"AGE", "SEX", "BMI", "SBP", "DBP", "HDL", "BREAKFAST"}.issubset(df_new.columns):
+    # 4) pkl 모델이 학습될 때 사용한 "원래 이름" 컬럼들도 다시 만들어주기
+    if {
+        "AGE",
+        "SEX",
+        "BMI",
+        "SBP",
+        "DBP",
+        "HDL",
+        "BREAKFAST",
+    }.issubset(df_new.columns):
         df_new["age"] = df_new["AGE"]
         df_new["sex"] = df_new["SEX"]
         df_new["HE_BMI"] = df_new["BMI"]
@@ -302,17 +356,16 @@ def load_new_data():
         df_new["HE_dbp"] = df_new["DBP"]
         df_new["HE_HDL_st2"] = df_new["HDL"]
         df_new["L_BR_FQ"] = df_new["BREAKFAST"]
-        # HE_TG는 rename에서 이름을 안 바꿨으니 원래대로 df_new["HE_TG"]로 이미 존재할 것
+        # HE_TG 는 원본 이름 그대로 존재한다고 가정
 
     return df_new
 
 
-
-# 데이터 로드
+# 실제 데이터 로드
 df = load_data()
 df_new = load_new_data()
 
-# 전역 변수 설정 (청소년 모델)
+# 청소년 데이터 전처리
 teen_bmi_cutoff = None
 if not df.empty:
     df = df[~df["YEAR"].isin(TEEN_EXCLUDED_YEARS)].copy()
@@ -346,25 +399,30 @@ else:
     df["UNHEALTHY_SCORE"] = np.nan
     df["NET_DIET_SCORE"] = np.nan
 
-# ⚡️ pkl에서 모델 로드 & 성능 계산
+# ⚡️ 성인 모델 성능 계산
 adult_model_results_global = compute_adult_model_results(df_new, logit_model)
 adult_model_summary_global = (
     adult_model_results_global.get("metrics") if adult_model_results_global else None
 )
 adult_model_coefs = (
-    adult_model_results_global.get("model_params") if adult_model_results_global else None
+    adult_model_results_global.get("model_params")
+    if adult_model_results_global
+    else None
 )
+
+# 성인 모델에서 찾은 best threshold를 전역 상수로 재설정
+if adult_model_summary_global:
+    ADULT_MODEL_THRESHOLD = adult_model_summary_global["threshold"]
 
 teen_model_results_global = load_teen_model_results_from_file()
 teen_model_summary_global = (
     teen_model_results_global.get("logistic") if teen_model_results_global else None
 )
 
-# ==============================================================================
-# 📝 Streamlit 페이지 및 위젯
-# ==============================================================================
+# ======================================================================
+# 🌐 Streamlit UI 시작
+# ======================================================================
 
-# 페이지 설정
 st.set_page_config(
     page_title="건강 데이터 분석 대시보드",
     page_icon="📊",
@@ -376,9 +434,8 @@ st.set_page_config(
 st.sidebar.header("📊 데이터셋 선택")
 dataset_choice = st.sidebar.radio(
     "분석할 데이터셋을 선택하세요", ["청소년 데이터", "성인 데이터"], index=1
-)  # 기본값 성인 데이터
+)
 
-# 선택된 데이터셋에 따라 사용할 데이터 결정
 if dataset_choice == "청소년 데이터":
     current_df = df
     is_adult = False
@@ -389,15 +446,12 @@ else:
 # 사이드바 필터
 st.sidebar.header("🔍 필터 옵션")
 
-# 연도 필터
 years = sorted(current_df["YEAR"].unique()) if "YEAR" in current_df.columns else []
 selected_years = st.sidebar.multiselect("연도 선택", options=years, default=years)
 
-# 성별 필터
 sex_options = ["전체", "남성", "여성"]
 selected_sex = st.sidebar.selectbox("성별 선택", sex_options)
 
-# 연령 필터
 min_age = (
     int(current_df["AGE"].min())
     if not current_df.empty
@@ -416,18 +470,15 @@ age_range = st.sidebar.slider(
     "연령 범위", min_value=min_age, max_value=max_age, value=(min_age, max_age)
 )
 
-# 데이터 필터링
 filtered_df = current_df.copy()
 if not filtered_df.empty:
     if "YEAR" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["YEAR"].isin(selected_years)]
-
     if "AGE" in filtered_df.columns:
         filtered_df = filtered_df[
             (filtered_df["AGE"] >= age_range[0])
             & (filtered_df["AGE"] <= age_range[1])
         ]
-
     if selected_sex == "남성":
         filtered_df = filtered_df[filtered_df["SEX"] == 1.0]
     elif selected_sex == "여성":
@@ -435,7 +486,6 @@ if not filtered_df.empty:
 else:
     filtered_df = pd.DataFrame()
 
-# 청소년 데이터에만 도시 유형 필터 적용
 if not is_adult and "CTYPE" in current_df.columns:
     city_types = ["전체"] + list(current_df["CTYPE"].unique())
     selected_city = st.sidebar.selectbox("도시 유형 선택", city_types)
@@ -446,45 +496,29 @@ if not is_adult and "CTYPE" in current_df.columns:
 st.title("📊 건강 데이터 분석 대시보드")
 st.markdown("---")
 
-# 주요 지표 (KPI)
+# KPI
 col1, col2, col3, col4, col5 = st.columns(5)
-
 with col1:
     st.metric("총 데이터 수", f"{len(filtered_df):,}개")
-
 with col2:
     avg_height = (
-        filtered_df["HT"].dropna().mean()
-        if "HT" in filtered_df.columns
-        else np.nan
+        filtered_df["HT"].dropna().mean() if "HT" in filtered_df.columns else np.nan
     )
-    st.metric(
-        "평균 키",
-        f"{avg_height:.1f}cm" if not pd.isna(avg_height) else "N/A",
-    )
-
+    st.metric("평균 키", f"{avg_height:.1f}cm" if not pd.isna(avg_height) else "N/A")
 with col3:
     avg_weight = (
-        filtered_df["WT"].dropna().mean()
-        if "WT" in filtered_df.columns
-        else np.nan
+        filtered_df["WT"].dropna().mean() if "WT" in filtered_df.columns else np.nan
     )
     st.metric(
-        "평균 몸무게",
-        f"{avg_weight:.1f}kg" if not pd.isna(avg_weight) else "N/A",
+        "평균 몸무게", f"{avg_weight:.1f}kg" if not pd.isna(avg_weight) else "N/A"
     )
-
 with col4:
     avg_bmi = (
         filtered_df["BMI"].dropna().mean()
         if "BMI" in filtered_df.columns
         else np.nan
     )
-    st.metric(
-        "평균 BMI",
-        f"{avg_bmi:.2f}" if not pd.isna(avg_bmi) else "N/A",
-    )
-
+    st.metric("평균 BMI", f"{avg_bmi:.2f}" if not pd.isna(avg_bmi) else "N/A")
 with col5:
     total_records = len(df) if not is_adult else len(df_new)
     filtered_ratio = (len(filtered_df) / total_records * 100) if total_records > 0 else 0
@@ -492,7 +526,7 @@ with col5:
 
 st.markdown("---")
 
-# 탭 생성
+# 탭
 tab_names = [
     "📈 개요",
     "👥 인구통계",
@@ -504,11 +538,11 @@ tab_names = [
 ]
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(tab_names)
 
-# 탭 1: 개요
+# ---------------- 탭 1: 개요 ----------------
 with tab1:
     st.header("데이터 개요")
-    col1, col2 = st.columns(2)
-    with col1:
+    col1_, col2_ = st.columns(2)
+    with col1_:
         year_counts = (
             filtered_df["YEAR"].value_counts().sort_index()
             if "YEAR" in filtered_df.columns
@@ -525,7 +559,7 @@ with tab1:
             )
             fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-    with col2:
+    with col2_:
         sex_counts = (
             filtered_df["SEX"].value_counts()
             if "SEX" in filtered_df.columns
@@ -541,8 +575,8 @@ with tab1:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-    col3, col4 = st.columns(2)
-    with col3:
+    col3_, col4_ = st.columns(2)
+    with col3_:
         age_counts = (
             filtered_df["AGE"].value_counts().sort_index()
             if "AGE" in filtered_df.columns
@@ -559,7 +593,7 @@ with tab1:
             )
             fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-    with col4:
+    with col4_:
         if "CTYPE" in filtered_df.columns:
             ctype_counts = filtered_df["CTYPE"].value_counts()
             if len(ctype_counts) > 0:
@@ -587,15 +621,13 @@ with tab1:
                 fig.update_layout(showlegend=False, xaxis_tickangle=-45)
                 st.plotly_chart(fig, use_container_width=True)
 
-# 탭 2: 인구통계
+# ---------------- 탭 2: 인구통계 ----------------
 with tab2:
     st.header("인구통계 분석")
-    col1, col2 = st.columns(2)
-    with col1:
+    col1_, col2_ = st.columns(2)
+    with col1_:
         ht_data = (
-            filtered_df["HT"].dropna()
-            if "HT" in filtered_df.columns
-            else pd.Series()
+            filtered_df["HT"].dropna() if "HT" in filtered_df.columns else pd.Series()
         )
         if len(ht_data) > 0:
             fig = px.histogram(
@@ -606,11 +638,9 @@ with tab2:
                 color_discrete_sequence=["coral"],
             )
             st.plotly_chart(fig, use_container_width=True)
-    with col2:
+    with col2_:
         wt_data = (
-            filtered_df["WT"].dropna()
-            if "WT" in filtered_df.columns
-            else pd.Series()
+            filtered_df["WT"].dropna() if "WT" in filtered_df.columns else pd.Series()
         )
         if len(wt_data) > 0:
             fig = px.histogram(
@@ -639,8 +669,8 @@ with tab2:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    col3, col4 = st.columns(2)
-    with col3:
+    col3_, col4_ = st.columns(2)
+    with col3_:
         year_height = (
             filtered_df.groupby("YEAR")["HT"].mean().dropna()
             if "YEAR" in filtered_df.columns and "HT" in filtered_df.columns
@@ -656,7 +686,7 @@ with tab2:
             )
             fig.update_traces(line_color="blue", line_width=3)
             st.plotly_chart(fig, use_container_width=True)
-    with col4:
+    with col4_:
         year_weight = (
             filtered_df.groupby("YEAR")["WT"].mean().dropna()
             if "YEAR" in filtered_df.columns and "WT" in filtered_df.columns
@@ -673,8 +703,8 @@ with tab2:
             fig.update_traces(line_color="red", line_width=3)
             st.plotly_chart(fig, use_container_width=True)
 
-    col5, col6 = st.columns(2)
-    with col5:
+    col5_, col6_ = st.columns(2)
+    with col5_:
         sex_height = (
             filtered_df.groupby("SEX")["HT"].mean().dropna()
             if "SEX" in filtered_df.columns and "HT" in filtered_df.columns
@@ -691,7 +721,7 @@ with tab2:
                 color_discrete_sequence=["#ff9999", "#66b3ff"],
             )
             st.plotly_chart(fig, use_container_width=True)
-    with col6:
+    with col6_:
         sex_weight = (
             filtered_df.groupby("SEX")["WT"].mean().dropna()
             if "SEX" in filtered_df.columns and "WT" in filtered_df.columns
@@ -727,14 +757,12 @@ with tab2:
         fig.add_vline(x=25.0, line_dash="dash", line_color="red")
         st.plotly_chart(fig, use_container_width=True)
 
-# 탭 3: 식습관 / 건강 지표
+# ---------------- 탭 3: 건강/식습관 ----------------
 with tab3:
     if is_adult:
         st.header("🏥 건강 지표 및 식습관 분석")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
+        col1_, col2_ = st.columns(2)
+        with col1_:
             glucose_data = (
                 filtered_df["GLUCOSE"].dropna()
                 if "GLUCOSE" in filtered_df.columns
@@ -748,12 +776,9 @@ with tab3:
                     title="혈당 분포",
                     color_discrete_sequence=["lightblue"],
                 )
-                fig.add_vline(
-                    x=126, line_dash="dash", line_color="red"
-                )
+                fig.add_vline(x=126, line_dash="dash", line_color="red")
                 st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
+        with col2_:
             hba1c_data = (
                 filtered_df["HbA1c"].dropna()
                 if "HbA1c" in filtered_df.columns
@@ -767,18 +792,13 @@ with tab3:
                     title="당화혈색소 분포",
                     color_discrete_sequence=["lightgreen"],
                 )
-                fig.add_vline(
-                    x=5.7, line_dash="dash", line_color="green"
-                )
-                fig.add_vline(
-                    x=6.5, line_dash="dash", line_color="red"
-                )
+                fig.add_vline(x=5.7, line_dash="dash", line_color="green")
+                fig.add_vline(x=6.5, line_dash="dash", line_color="red")
                 st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("📈 연도별 건강 지표 추이")
-        col1, col2 = st.columns(2)
-
-        with col1:
+        col1_, col2_ = st.columns(2)
+        with col1_:
             year_bmi = (
                 filtered_df.groupby("YEAR")["BMI"].mean().dropna()
                 if "YEAR" in filtered_df.columns and "BMI" in filtered_df.columns
@@ -794,8 +814,7 @@ with tab3:
                 )
                 fig.update_traces(line_color="blue", line_width=3)
                 st.plotly_chart(fig, use_container_width=True)
-
-        with col2:
+        with col2_:
             year_glucose = (
                 filtered_df.groupby("YEAR")["GLUCOSE"].mean().dropna()
                 if "YEAR" in filtered_df.columns and "GLUCOSE" in filtered_df.columns
@@ -813,9 +832,7 @@ with tab3:
                 st.plotly_chart(fig, use_container_width=True)
 
         if "OBESITY" in filtered_df.columns:
-            obesity_counts = (
-                filtered_df["OBESITY"].dropna().value_counts().sort_index()
-            )
+            obesity_counts = filtered_df["OBESITY"].dropna().value_counts().sort_index()
             if len(obesity_counts) > 0:
                 obesity_labels = {
                     1.0: "저체중",
@@ -826,8 +843,7 @@ with tab3:
                     6.0: "3단계 비만",
                 }
                 display_labels = [
-                    obesity_labels.get(x, str(x))
-                    for x in obesity_counts.index
+                    obesity_labels.get(x, str(x)) for x in obesity_counts.index
                 ]
                 fig = px.bar(
                     x=display_labels,
@@ -846,126 +862,92 @@ with tab3:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-        # 연도별 당뇨 발병률 추이 (성별 구분)
         if "DIABETES" in filtered_df.columns:
             st.subheader("🩺 연도별 당뇨 발병률 추이 (성별 구분)")
-
-            diabetes_data = filtered_df[
-                ["YEAR", "SEX", "DIABETES"]
-            ].dropna()
+            diabetes_data = filtered_df[["YEAR", "SEX", "DIABETES"]].dropna()
             if len(diabetes_data) > 0:
 
-                def get_diabetes_rate(df_):
-                    return (
-                        (df_["DIABETES"] == 1.0).sum()
-                        / len(df_)
-                        * 100
-                    )
+                def get_rate(d):
+                    return (d["DIABETES"] == 1.0).sum() / len(d) * 100
 
-                year_diabetes_all = (
+                year_all = (
                     diabetes_data.groupby("YEAR")
-                    .apply(get_diabetes_rate)
+                    .apply(get_rate)
                     .reset_index(name="당뇨발병률")
                 )
-                year_diabetes_all["성별"] = "전체"
+                year_all["성별"] = "전체"
 
-                year_diabetes_male = (
+                year_male = (
                     diabetes_data[diabetes_data["SEX"] == 1.0]
                     .groupby("YEAR")
-                    .apply(get_diabetes_rate)
+                    .apply(get_rate)
                     .reset_index(name="당뇨발병률")
                 )
-                year_diabetes_male["성별"] = "남성"
+                year_male["성별"] = "남성"
 
-                year_diabetes_female = (
+                year_female = (
                     diabetes_data[diabetes_data["SEX"] == 2.0]
                     .groupby("YEAR")
-                    .apply(get_diabetes_rate)
+                    .apply(get_rate)
                     .reset_index(name="당뇨발병률")
                 )
-                year_diabetes_female["성별"] = "여성"
+                year_female["성별"] = "여성"
 
-                combined_diabetes_data = pd.concat(
-                    [year_diabetes_all, year_diabetes_male, year_diabetes_female],
-                    ignore_index=True,
+                comb = pd.concat([year_all, year_male, year_female], ignore_index=True)
+                fig = px.line(
+                    comb,
+                    x="YEAR",
+                    y="당뇨발병률",
+                    color="성별",
+                    markers=True,
+                    labels={"YEAR": "연도", "당뇨발병률": "당뇨 발병률 (%)"},
+                    title="연도별 당뇨 발병률 추이 (성별 구분)",
+                    color_discrete_map={
+                        "전체": "purple",
+                        "남성": "#ff9999",
+                        "여성": "#66b3ff",
+                    },
                 )
-
-                if len(combined_diabetes_data) > 0:
-                    fig = px.line(
-                        combined_diabetes_data,
-                        x="YEAR",
-                        y="당뇨발병률",
-                        color="성별",
-                        markers=True,
-                        labels={
-                            "YEAR": "연도",
-                            "당뇨발병률": "당뇨 발병률 (%)",
-                        },
-                        title="연도별 당뇨 발병률 추이 (성별 구분)",
-                        color_discrete_map={
-                            "전체": "purple",
-                            "남성": "#ff9999",
-                            "여성": "#66b3ff",
-                        },
+                fig.update_traces(line_width=3)
+                fig.update_layout(
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1,
                     )
-                    fig.update_traces(line_width=3)
-                    fig.update_layout(
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1,
-                        )
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
-            # 성별 당뇨 발병률 비교
             st.subheader("📊 성별 당뇨 발병률 비교")
-
-            diabetes_sex_data = filtered_df[["SEX", "DIABETES"]].dropna()
-            if len(diabetes_sex_data) > 0:
-                sex_diabetes_rates = {}
-
-                total_diabetes = (diabetes_sex_data["DIABETES"] == 1.0).sum()
-                sex_diabetes_rates["전체"] = (
-                    total_diabetes / len(diabetes_sex_data) * 100
+            dsex = filtered_df[["SEX", "DIABETES"]].dropna()
+            if len(dsex) > 0:
+                rates = {}
+                total_pos = (dsex["DIABETES"] == 1.0).sum()
+                rates["전체"] = total_pos / len(dsex) * 100
+                male = dsex[dsex["SEX"] == 1.0]
+                if len(male) > 0:
+                    rates["남성"] = (male["DIABETES"] == 1.0).sum() / len(male) * 100
+                female = dsex[dsex["SEX"] == 2.0]
+                if len(female) > 0:
+                    rates["여성"] = (
+                        (female["DIABETES"] == 1.0).sum() / len(female) * 100
+                    )
+                fig = px.bar(
+                    x=list(rates.keys()),
+                    y=list(rates.values()),
+                    labels={"x": "성별", "y": "당뇨 발병률 (%)"},
+                    title="성별 당뇨 발병률 비교",
+                    color=list(rates.keys()),
+                    color_discrete_map={
+                        "전체": "purple",
+                        "남성": "#ff9999",
+                        "여성": "#66b3ff",
+                    },
                 )
+                st.plotly_chart(fig, use_container_width=True)
 
-                male_data = diabetes_sex_data[diabetes_sex_data["SEX"] == 1.0]
-                if len(male_data) > 0:
-                    sex_diabetes_rates["남성"] = (
-                        (male_data["DIABETES"] == 1.0).sum()
-                        / len(male_data)
-                        * 100
-                    )
-
-                female_data = diabetes_sex_data[
-                    diabetes_sex_data["SEX"] == 2.0
-                ]
-                if len(female_data) > 0:
-                    sex_diabetes_rates["여성"] = (
-                        (female_data["DIABETES"] == 1.0).sum()
-                        / len(female_data)
-                        * 100
-                    )
-
-                if len(sex_diabetes_rates) > 0:
-                    fig = px.bar(
-                        x=list(sex_diabetes_rates.keys()),
-                        y=list(sex_diabetes_rates.values()),
-                        labels={"x": "성별", "y": "당뇨 발병률 (%)"},
-                        title="성별 당뇨 발병률 비교",
-                        color=list(sex_diabetes_rates.keys()),
-                        color_discrete_map={
-                            "전체": "purple",
-                            "남성": "#ff9999",
-                            "여성": "#66b3ff",
-                        },
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-
-        # 아침식사 빈도
         if "BREAKFAST" in filtered_df.columns:
             breakfast_counts_new = (
                 filtered_df["BREAKFAST"].dropna().value_counts().sort_index()
@@ -988,28 +970,22 @@ with tab3:
                     title="아침식사 빈도 분포",
                     color_discrete_sequence=px.colors.sequential.YlOrBr,
                 )
-                fig.update_traces(
-                    textposition="inside", textinfo="percent+label"
-                )
+                fig.update_traces(textposition="inside", textinfo="percent+label")
                 st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("청소년 데이터의 식습관 분석 및 트렌드 시각화 코드는 생략되었습니다.")
 
-    else:  # 청소년 데이터
-        st.info("청소년 데이터의 식습관 분석 및 트렌드 시각화 코드는 변경 없이 유지됩니다.")
-
-# 탭 4: 상관관계 (성인 모델 변수 포함)
+# ---------------- 탭 4: 상관관계 ----------------
 with tab4:
     st.header("상관관계 분석")
-
     if is_adult:
-        # 성인 데이터 상관관계
         health_cols = ["BMI", "GLUCOSE", "HbA1c", "SBP", "DBP", "HDL", "DIABETES"]
-        health_data = filtered_df.copy()
-        health_cols = [col for col in health_cols if col in health_data.columns]
-        health_data = health_data[health_cols].dropna()
-        if len(health_data) > 0:
-            health_corr = health_data.corr()
+        health_cols = [c for c in health_cols if c in filtered_df.columns]
+        hdata = filtered_df[health_cols].dropna()
+        if len(hdata) > 0:
+            corr = hdata.corr()
             fig = px.imshow(
-                health_corr,
+                corr,
                 labels=dict(x="변수", y="변수", color="상관계수"),
                 x=health_cols,
                 y=health_cols,
@@ -1019,76 +995,65 @@ with tab4:
             )
             st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("청소년 데이터 상관관계 분석 코드는 변경 없이 유지됩니다.")
+        st.info("청소년 데이터 상관관계 분석 코드는 생략되었습니다.")
 
-# 탭 5: 데이터
+# ---------------- 탭 5: 데이터 ----------------
 with tab5:
     st.header("데이터 테이블")
-
-    # 통계 요약
     st.subheader("📊 통계 요약")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
+    col1_, col2_, col3_ = st.columns(3)
+    with col1_:
         st.write("**기본 정보**")
-        if "YEAR" in filtered_df.columns and not filtered_df.empty:
+        st.write(f"- 총 데이터 수: {len(filtered_df):,}개")
+        if "YEAR" in filtered_df.columns:
             st.write(
-                f"- 총 데이터 수: {len(filtered_df):,}개\n"
                 f"- 연도 범위: {filtered_df['YEAR'].min()} ~ {filtered_df['YEAR'].max()}"
             )
         else:
-            st.write(f"- 총 데이터 수: {len(filtered_df):,}개")
             st.write("- 연도: N/A")
-        if "AGE" in filtered_df.columns and not filtered_df.empty:
+        if "AGE" in filtered_df.columns:
             st.write(
                 f"- 나이 범위: {filtered_df['AGE'].min()} ~ {filtered_df['AGE'].max()}세"
             )
         else:
             st.write("- 나이: N/A")
-
-    with col2:
+    with col2_:
         st.write("**평균값**")
-        st.write(
-            f"- 평균 키: {filtered_df['HT'].mean():.2f}cm"
-            if "HT" in filtered_df.columns and not filtered_df.empty
-            else "- 평균 키: N/A"
-        )
-        st.write(
-            f"- 평균 몸무게: {filtered_df['WT'].mean():.2f}kg"
-            if "WT" in filtered_df.columns and not filtered_df.empty
-            else "- 평균 몸무게: N/A"
-        )
-        st.write(
-            f"- 평균 BMI: {filtered_df['BMI'].mean():.2f}"
-            if "BMI" in filtered_df.columns and not filtered_df.empty
-            else "- 평균 BMI: N/A"
-        )
-
-    with col3:
+        if "HT" in filtered_df.columns:
+            st.write(f"- 평균 키: {filtered_df['HT'].mean():.2f}cm")
+        else:
+            st.write("- 평균 키: N/A")
+        if "WT" in filtered_df.columns:
+            st.write(f"- 평균 몸무게: {filtered_df['WT'].mean():.2f}kg")
+        else:
+            st.write("- 평균 몸무게: N/A")
+        if "BMI" in filtered_df.columns:
+            st.write(f"- 평균 BMI: {filtered_df['BMI'].mean():.2f}")
+        else:
+            st.write("- 평균 BMI: N/A")
+    with col3_:
         st.write("**분포**")
-        if "SEX" in filtered_df.columns and not filtered_df.empty:
-            sex_counts = filtered_df["SEX"].value_counts()
-            for sex_val, count in sex_counts.items():
-                sex_name = "남성" if sex_val == 1.0 else "여성"
-                st.write(f"- {sex_name}: {count:,}명")
+        if "SEX" in filtered_df.columns:
+            sc = filtered_df["SEX"].value_counts()
+            for v, c in sc.items():
+                name = "남성" if v == 1.0 else "여성"
+                st.write(f"- {name}: {c:,}명")
 
     st.markdown("---")
-
     st.subheader("필터링된 데이터")
     st.dataframe(filtered_df, use_container_width=True)
 
-# 탭 6: 모델 성능
+# ---------------- 탭 6: 모델 성능 ----------------
 with tab6:
     if is_adult:
         st.header("🤖 성인 당뇨병 예측 모델 성능")
         if adult_model_summary_global:
             metrics = adult_model_summary_global
             st.markdown(
-                f"- **모델**: Logistic Regression (사전 학습 모델 사용)\n"
+                f"- **모델**: Logistic Regression (statsmodels)\n"
                 f"- **라벨 기준**: DIABETES=1.0 (의사 진단 여부)\n"
-                f"- **적용 임계값 (F1 최적화)**: **0.1667**"
+                f"- **적용 임계값 (F1 기준 최적화)**: **{metrics['threshold']:.4f}**"
             )
-
             metrics_chart = pd.DataFrame(
                 {
                     "지표": ["Accuracy", "Recall", "Precision", "F1-Score", "AUC-ROC"],
@@ -1101,7 +1066,6 @@ with tab6:
                     ],
                 }
             )
-
             fig = px.bar(
                 metrics_chart,
                 x="지표",
@@ -1113,89 +1077,69 @@ with tab6:
             fig.update_yaxes(range=[0, 1])
             st.plotly_chart(fig, use_container_width=True)
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Accuracy", f"{metrics['accuracy']*100:.1f}%")
-            col2.metric("Recall (선별력)", f"{metrics['recall']*100:.1f}%")
-            col3.metric("Precision", f"{metrics['precision']*100:.1f}%")
-
-            col4, col5 = st.columns(2)
-            col4.metric("F1-Score", f"{metrics['f1']*100:.1f}%")
-            col5.metric("AUC-ROC", f"{metrics['auc']:.3f}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Accuracy", f"{metrics['accuracy']*100:.1f}%")
+            c2.metric("Recall (선별력)", f"{metrics['recall']*100:.1f}%")
+            c3.metric("Precision", f"{metrics['precision']*100:.1f}%")
+            c4, c5 = st.columns(2)
+            c4.metric("F1-Score", f"{metrics['f1']*100:.1f}%")
+            c5.metric("AUC-ROC", f"{metrics['auc']:.3f}")
             st.caption(f"학습 표본 수: {metrics['sample_size']:,}건")
 
             st.markdown("---")
             st.subheader("📊 주요 위험 요인 오즈비 (Odds Ratio)")
-            st.info(
-                "다른 모든 변수들을 통제한 상태에서, 해당 요인이 1 단위 증가할 때 당뇨 발병 오즈가 얼마나 변화하는지 나타냅니다."
-            )
-
-            if (
-                adult_model_results_global
-                and "odds_summary" in adult_model_results_global
-            ):
-                odds_df = (
-                    pd.DataFrame(adult_model_results_global["odds_summary"])
-                    .T.drop("const", errors="ignore")
-                )
+            if adult_model_results_global and "odds_summary" in adult_model_results_global:
+                odds_df = pd.DataFrame(
+                    adult_model_results_global["odds_summary"]
+                ).T.drop("const", errors="ignore")
                 odds_df = odds_df.rename(
                     columns={"OR": "오즈비(OR)", "P-value": "p-value"}
                 ).round(4)
-
                 feature_map = {
-                    "AGE": "나이 (1세당)",
-                    "SEX": "성별 (남성=1, 여성=2)",
-                    "BMI": "BMI (1kg/m²당)",
-                    "SBP": "수축기 혈압 (1mmHg당)",
-                    "DBP": "이완기 혈압 (1mmHg당)",
-                    "HDL": "HDL-C (1mg/dL당)",
+                    "age": "나이 (1세당)",
+                    "sex": "성별 (남성=1, 여성=2)",
+                    "HE_BMI": "BMI (1kg/m²당)",
+                    "HE_sbp": "수축기 혈압 (1mmHg당)",
+                    "HE_dbp": "이완기 혈압 (1mmHg당)",
+                    "HE_TG": "중성지방 (1mg/dL당)",
+                    "HE_HDL_st2": "HDL-C (1mg/dL당)",
                     "DM_FH": "가족력 (있음)",
-                    "BREAKFAST": "아침식사 빈도 (1코드당)",
+                    "L_BR_FQ": "아침식사 빈도 (1코드당)",
                 }
-                odds_df.index = [
-                    feature_map.get(idx, idx) for idx in odds_df.index
-                ]
-
+                odds_df.index = [feature_map.get(idx, idx) for idx in odds_df.index]
                 odds_df = odds_df.sort_values("오즈비(OR)", ascending=False)
                 st.dataframe(odds_df, use_container_width=True)
-
         else:
             st.warning(
-                "성인 모델 학습에 필요한 데이터(DIABETES, SBP, HDL 등)가 부족하거나, "
-                "pkl 모델이 없어서 성능을 계산할 수 없습니다."
+                "성인 모델 학습에 필요한 데이터(DIABETES, SBP, HDL 등)가 부족하거나 누락되었습니다."
             )
     else:
-        st.info("청소년 모델 성능 분석 코드는 변경 없이 유지됩니다.")
+        st.info("청소년 모델 성능 분석 코드는 생략되었습니다.")
 
-# 탭 7: 성인 예측
+# ---------------- 탭 7: 성인 예측 ----------------
 with tab7:
     st.header("🧑‍💻 성인 당뇨병 위험 예측기")
     st.markdown("---")
 
     if logit_model is None:
         st.warning(
-            "모델 pkl 파일을 찾을 수 없어서 예측기를 활성화할 수 없습니다. "
-            "MODEL_PATH 경로와 pkl 파일을 확인해주세요."
+            "모델 학습에 필요한 데이터가 부족하거나 pkl 로드에 실패하여 예측기를 사용할 수 없습니다."
         )
     else:
         st.subheader("1. 신체 및 인구통계 정보 입력")
-
-        col_age, col_sex, col_height, col_weight = st.columns(4)
-
-        with col_age:
+        ca, cs, ch, cw = st.columns(4)
+        with ca:
             age_input = st.slider("나이 (세)", min_value=19, max_value=100, value=45)
-
-        with col_sex:
-            sex_input_label = st.selectbox(
+        with cs:
+            sex_label = st.selectbox(
                 "성별", options=["남성 (1.0)", "여성 (2.0)"], index=0
             )
-            sex_input = 1.0 if "남성" in sex_input_label else 2.0
-
-        with col_height:
+            sex_input = 1.0 if "남성" in sex_label else 2.0
+        with ch:
             height_input = st.number_input(
                 "키 (cm)", min_value=100.0, max_value=250.0, value=170.0, step=0.1
             )
-
-        with col_weight:
+        with cw:
             weight_input = st.number_input(
                 "몸무게 (kg)", min_value=30.0, max_value=200.0, value=75.0, step=0.1
             )
@@ -1210,35 +1154,22 @@ with tab7:
             4.0: "1단계 비만",
             5.0: "2단계 비만 이상",
         }
-
         st.info(
             f"계산된 BMI: **{bmi_current:.2f} kg/m²** "
             f"(분류: **{bmi_label_map.get(obe_level_current, '미분류')}**)"
         )
 
         st.subheader("2. 건강 지표 및 생활 습관 입력")
-
-        col_sbp, col_dbp, col_hdl, col_fh = st.columns(4)
-
-        with col_sbp:
+        csbp, cdbp, chdl, cfh = st.columns(4)
+        with csbp:
             sbp_input = st.number_input(
-                "수축기 혈압 (SBP)",
-                min_value=80.0,
-                max_value=200.0,
-                value=120.0,
-                step=1.0,
+                "수축기 혈압 (SBP)", min_value=80.0, max_value=200.0, value=120.0, step=1.0
             )
-
-        with col_dbp:
+        with cdbp:
             dbp_input = st.number_input(
-                "이완기 혈압 (DBP)",
-                min_value=50.0,
-                max_value=120.0,
-                value=80.0,
-                step=1.0,
+                "이완기 혈압 (DBP)", min_value=50.0, max_value=120.0, value=80.0, step=1.0
             )
-
-        with col_hdl:
+        with chdl:
             hdl_input_val = st.number_input(
                 f"HDL-C (mg/dL) (생략 시 {ADULT_DEFAULT_HDL:.1f})",
                 min_value=10.0,
@@ -1246,21 +1177,17 @@ with tab7:
                 value=ADULT_DEFAULT_HDL,
                 step=1.0,
             )
-
-        with col_fh:
-            dm_fh_input_label = st.selectbox(
-                "당뇨병 가족력", options=["없음 (0)", "있음 (1)"]
+        with cfh:
+            dm_fh_label = st.selectbox(
+                "당뇨병 가족력", options=["없음 (0)", "있음 (1)"], index=0
             )
-            dm_fh_input = 1 if "있음" in dm_fh_input_label else 0
+            dm_fh_input = 1 if "있음" in dm_fh_label else 0
 
-        br_fq_options = get_br_fq_select_options()
-        br_fq_label = st.selectbox(
-            "아침 식사 빈도", options=list(br_fq_options.keys()), index=0
-        )
-        br_fq_input = br_fq_options[br_fq_label]
+        br_options = get_br_fq_select_options()
+        br_label = st.selectbox("아침 식사 빈도", options=list(br_options.keys()), index=0)
+        br_fq_input = br_options[br_label]
 
         st.markdown("---")
-
         if st.button("당뇨병 위험 확률 예측하기", type="primary"):
             try:
                 used_hdl = (
@@ -1268,13 +1195,7 @@ with tab7:
                     if hdl_input_val != ADULT_DEFAULT_HDL
                     else ADULT_DEFAULT_HDL
                 )
-
-                (
-                    bmi_result,
-                    obe_level_result,
-                    prob_result,
-                    used_hdl,
-                ) = predict_diabetes_risk_final(
+                bmi_res, obe_res, prob_res, used_hdl = predict_diabetes_risk_final(
                     age_input,
                     sex_input,
                     height_input,
@@ -1286,53 +1207,45 @@ with tab7:
                     logit_model,
                     hdl=used_hdl,
                 )
-
                 st.subheader("🔮 예측 결과")
-
-                col_prob, col_risk = st.columns(2)
-
-                with col_prob:
-                    st.metric(
-                        "예측된 당뇨병 발병 확률",
-                        f"{prob_result * 100:.2f}%",
-                    )
+                cp, cr = st.columns(2)
+                with cp:
+                    st.metric("예측된 당뇨병 발병 확률", f"{prob_res * 100:.2f}%")
 
                 risk_status = "❌ 위험군 아님"
                 risk_color = "green"
-                if prob_result >= ADULT_MODEL_THRESHOLD:
+                if prob_res >= ADULT_MODEL_THRESHOLD:
                     risk_status = "✅ 고위험군 (추가 검사 권고)"
                     risk_color = "red"
-
-                with col_risk:
+                with cr:
                     st.markdown(
-                        f"**<p style='font-size: 24px; color:{risk_color};'>{risk_status}</p>**",
+                        f"<p style='font-size: 24px; color:{risk_color};'><b>{risk_status}</b></p>",
                         unsafe_allow_html=True,
                     )
 
                 st.markdown("---")
-
                 st.markdown("#### 입력 데이터 요약")
                 st.markdown(
                     f"""
-                - **계산된 BMI:** {bmi_result:.2f} kg/m² ({bmi_label_map.get(obe_level_result, '미분류')})
+                - **계산된 BMI:** {bmi_res:.2f} kg/m² ({bmi_label_map.get(obe_res, '미분류')})
                 - **가족력:** {'있음' if dm_fh_input == 1 else '없음'}
-                - **HDL-C:** {used_hdl:.2f} mg/dL ({'입력값 사용' if hdl_input_val != ADULT_DEFAULT_HDL else '평균값 사용'})
+                - **HDL-C:** {used_hdl:.2f} mg/dL
                 - **아침 식사 빈도:** {get_br_fq_label(br_fq_input)}
+                - **현재 사용 중인 분류 임계값:** {ADULT_MODEL_THRESHOLD:.4f}
                 """
                 )
-
             except Exception as e:
-                st.error(
-                    f"예측 중 오류가 발생했습니다. 입력값을 확인하거나 데이터/모델 파일을 확인해주세요: {e}"
-                )
+                st.error(f"예측 중 오류가 발생했습니다: {e}")
 
 # 사이드바 하단 정보
 st.sidebar.markdown("---")
-ratio = (len(filtered_df) / len(current_df) * 100) if len(current_df) > 0 else 0
-st.sidebar.info(
-    f"""
+if len(current_df) > 0:
+    st.sidebar.info(
+        f"""
     **현재 필터링된 데이터:**
     - {len(filtered_df):,}개 행
-    - 전체 데이터의 {ratio:.1f}%
+    - 전체 데이터의 {len(filtered_df)/len(current_df)*100:.1f}%
     """
-)
+    )
+else:
+    st.sidebar.info("현재 데이터가 없습니다.")
