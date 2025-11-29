@@ -1719,7 +1719,7 @@ with tab6:
                     title="청소년 비만 예측 모델 ROC 곡선",
                     xaxis=dict(range=[0, 1]),
                     yaxis=dict(range=[0, 1]),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                     margin=dict(l=40, r=20, t=60, b=60),
                 )
 
