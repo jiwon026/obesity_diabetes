@@ -1793,6 +1793,7 @@ with tab6:
                         ],
                         textposition="inside",
                         textfont=dict(color="white", size=11),
+                        textangle=0,
                     )
                 )
 
