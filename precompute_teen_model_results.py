@@ -5,7 +5,6 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -15,30 +14,33 @@ from sklearn.metrics import (
     roc_curve,
 )
 from sklearn.utils.class_weight import compute_class_weight
-from imblearn.ensemble import BalancedRandomForestClassifier
 from imblearn.over_sampling import SMOTE
 
-
+# ================== 상수 ==================
 TEEN_EXCLUDED_YEARS = {2015, 2016}
 TEEN_OBESITY_PERCENTILE = 0.95
-TEEN_MODEL_THRESHOLD = 0.49
+TEEN_MODEL_THRESHOLD = 0.49  # 초기값 (튜닝 시작점)
 
 
 def main():
+    # 1) 데이터 로드 & 전처리 ---------------------------------------------
     teen = pd.read_csv("9ch_final_data.csv")
     teen = teen[~teen["YEAR"].isin(TEEN_EXCLUDED_YEARS)].copy()
+
+    # BMI & 비만 라벨 (상위 5%)
     teen["BMI"] = teen["WT"] / ((teen["HT"] / 100) ** 2)
     cutoff = teen["BMI"].quantile(TEEN_OBESITY_PERCENTILE)
     teen["TEEN_OBESE_TOP5"] = (teen["BMI"] >= cutoff).astype(int)
 
-    teen["HEALTHY_SCORE"] = teen[["F_FRUIT", "F_VEG", "Breakfast_Category"]].sum(
-        axis=1
-    )
+    # 식습관 점수
+    teen["HEALTHY_SCORE"] = teen[["F_FRUIT", "F_VEG", "Breakfast_Category"]].sum(axis=1)
     teen["UNHEALTHY_SCORE"] = teen[["F_FASTFOOD", "SODA_INTAKE"]].sum(axis=1)
     teen["NET_DIET_SCORE"] = teen["HEALTHY_SCORE"] - teen["UNHEALTHY_SCORE"]
+
     teen["GROUP"] = teen["GROUP"].fillna("Unknown").astype(str)
     teen["CTYPE"] = teen["CTYPE"].fillna("Unknown").astype(str)
 
+    # 사용할 피처들
     features = [
         "F_BR",
         "F_FRUIT",
@@ -55,6 +57,7 @@ def main():
         "GROUP",
         "CTYPE",
     ]
+
     data = teen[features + ["TEEN_OBESE_TOP5"]].dropna()
     X = data[features]
     X = pd.get_dummies(X, columns=["GROUP", "CTYPE"], drop_first=False)
@@ -64,10 +67,10 @@ def main():
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # 엔지니어링 & 스케일링
+    # 2) 피처 엔지니어링 & 스케일링 --------------------------------------
     X_train_eng = X_train.copy()
     X_test_eng = X_test.copy()
-    
+
     for src, eng in [(X_train, X_train_eng), (X_test, X_test_eng)]:
         eng["AGE_FRUIT"] = src["AGE"] * src["F_FRUIT"]
         eng["AGE_VEG"] = src["AGE"] * src["F_VEG"]
@@ -75,7 +78,6 @@ def main():
         eng["FRUIT_VEG"] = src["F_FRUIT"] * src["F_VEG"]
         eng["FASTFOOD_SODA"] = src["F_FASTFOOD"] * src["SODA_INTAKE"]
         eng["BREAKFAST_AGE"] = src["Breakfast_Category"] * src["AGE"]
-        # 추가 상호작용 피처
         eng["HEALTHY_UNHEALTHY"] = src["HEALTHY_SCORE"] * src["UNHEALTHY_SCORE"]
         eng["AGE_NET_SCORE"] = src["AGE"] * src["NET_DIET_SCORE"]
         eng["SEX_NET_SCORE"] = src["SEX"] * src["NET_DIET_SCORE"]
@@ -85,7 +87,7 @@ def main():
     X_train_scaled = scaler.fit_transform(X_train_eng)
     X_test_scaled = scaler.transform(X_test_eng)
 
-    # 클래스 가중치 & SMOTE
+    # 3) 클래스 불균형 처리 (class weight + SMOTE) ------------------------
     class_weights = compute_class_weight(
         "balanced", classes=np.unique(y_train), y=y_train
     )
@@ -95,302 +97,69 @@ def main():
     smote = SMOTE(random_state=42)
     X_train_smote, y_train_smote = smote.fit_resample(X_train_scaled, y_train)
 
-    # Logistic Regression 튜닝 (C + threshold) - 더 넓은 범위 탐색
+    # 4) Logistic Regression 튜닝 (C + threshold) -------------------------
     best_c = 0.1
-    best_score = 0
+    best_score = 0.0
     best_thr = TEEN_MODEL_THRESHOLD
 
-    for c_val in [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 5.0]:
+    c_grid = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 5.0]
+    thr_grid = np.linspace(0.30, 0.65, 36)
+
+    for c_val in c_grid:
         lr_temp = LogisticRegression(
             max_iter=10000, class_weight="balanced", C=c_val, solver="lbfgs"
         )
         lr_temp.fit(X_train_smote, y_train_smote)
         y_prob_temp = lr_temp.predict_proba(X_test_scaled)[:, 1]
-        test_auc = roc_auc_score(y_test, y_prob_temp)
+        auc_temp = roc_auc_score(y_test, y_prob_temp)
 
-        for thr in np.linspace(0.30, 0.65, 36):
+        for thr in thr_grid:
             y_pred_temp = (y_prob_temp >= thr).astype(int)
             acc = accuracy_score(y_test, y_pred_temp)
             rec = recall_score(y_test, y_pred_temp)
-            # 조건: Accuracy >= 0.60, Recall >= 0.70 (더 높은 목표)
+
+            # 조건: Accuracy >= 0.60, Recall >= 0.70
             if acc >= 0.60 and rec >= 0.70:
-                score = acc * 0.30 + rec * 0.50 + test_auc * 0.20
+                score = acc * 0.30 + rec * 0.50 + auc_temp * 0.20
                 if score > best_score:
                     best_score = score
                     best_c = c_val
                     best_thr = thr
 
+    # 5) 최종 Logistic Regression 학습 -------------------------------------
     lr_model = LogisticRegression(
         max_iter=5000, class_weight="balanced", C=best_c, solver="lbfgs"
     )
     lr_model.fit(X_train_smote, y_train_smote)
+
     y_prob_lr = lr_model.predict_proba(X_test_scaled)[:, 1]
     y_pred_lr = (y_prob_lr >= best_thr).astype(int)
-    
-    # Logistic Regression 계수 및 오즈비 계산
+
+    # 6) 계수 & 오즈비 -----------------------------------------------------
     feature_names = X_train_eng.columns.tolist()
     coefficients = lr_model.coef_[0]
     odds_ratios = np.exp(coefficients)
-    
-    # 계수와 오즈비를 딕셔너리로 정리
-    coef_dict = {}
-    odds_ratio_dict = {}
-    for i, feature_name in enumerate(feature_names):
-        coef_dict[feature_name] = float(coefficients[i])
-        odds_ratio_dict[feature_name] = float(odds_ratios[i])
 
-    # Random Forest 튜닝 - 더 넓은 범위
-    best_rf_score = 0
-    best_rf_params = None
-    for n_est in [200, 300, 400, 500]:
-        for max_d in [8, 10, 12, 15, 18]:
-            for min_split in [5, 8, 10]:
-                rf_temp = RandomForestClassifier(
-                    n_estimators=n_est,
-                    max_depth=max_d,
-                    min_samples_split=min_split,
-                    min_samples_leaf=3,
-                    class_weight="balanced_subsample",
-                    random_state=42,
-                    n_jobs=-1,
-                )
-                rf_temp.fit(X_train_eng, y_train)
-                y_prob_rf_temp = rf_temp.predict_proba(X_test_eng)[:, 1]
-                auc_rf = roc_auc_score(y_test, y_prob_rf_temp)
-                for thr in np.linspace(0.30, 0.65, 36):
-                    y_pred_rf_temp = (y_prob_rf_temp >= thr).astype(int)
-                    acc = accuracy_score(y_test, y_pred_rf_temp)
-                    rec = recall_score(y_test, y_pred_rf_temp)
-                    if acc >= 0.60 and rec >= 0.70:
-                        score = acc * 0.30 + rec * 0.50 + auc_rf * 0.20
-                        if score > best_rf_score:
-                            best_rf_score = score
-                            best_rf_params = {
-                                "n_est": n_est,
-                                "max_d": max_d,
-                                "min_split": min_split,
-                                "thr": thr,
-                                "auc": auc_rf,
-                            }
+    coef_dict = {name: float(coefficients[i]) for i, name in enumerate(feature_names)}
+    odds_ratio_dict = {name: float(odds_ratios[i]) for i, name in enumerate(feature_names)}
 
-    if best_rf_params:
-        rf_model = RandomForestClassifier(
-            n_estimators=best_rf_params["n_est"],
-            max_depth=best_rf_params["max_d"],
-            min_samples_split=best_rf_params["min_split"],
-            min_samples_leaf=3,
-            class_weight="balanced_subsample",
-            random_state=42,
-            n_jobs=-1,
-        )
-        rf_thr = best_rf_params["thr"]
-    else:
-        rf_model = RandomForestClassifier(
-            n_estimators=400,
-            max_depth=15,
-            min_samples_split=5,
-            min_samples_leaf=3,
-            class_weight="balanced_subsample",
-            random_state=42,
-            n_jobs=-1,
-        )
-        rf_thr = 0.5
+    # OR 테이블(성인과 동일 포맷: {변수명: {Coef:..., OR:...}})
+    or_table = pd.DataFrame(
+        {"Coef": coefficients, "OR": odds_ratios}, index=feature_names
+    )
+    odds_summary = or_table.to_dict("index")
 
-    rf_model.fit(X_train_eng, y_train)
-    y_prob_rf = rf_model.predict_proba(X_test_eng)[:, 1]
-    y_pred_rf = (y_prob_rf >= rf_thr).astype(int)
+    # 7) ROC 곡선 좌표 -----------------------------------------------------
+    fpr_lr, tpr_lr, thr_roc = roc_curve(y_test, y_prob_lr)
+    auc_lr = roc_auc_score(y_test, y_prob_lr)
 
-    # Balanced RF 튜닝
-    best_brf_score = 0
-    best_brf_params = None
-    for n_est in [300, 400, 500]:
-        for max_d in [8, 10, 12]:
-            brf_temp = BalancedRandomForestClassifier(
-                n_estimators=n_est,
-                max_depth=max_d,
-                min_samples_split=5,
-                min_samples_leaf=3,
-                random_state=42,
-                n_jobs=-1,
-            )
-            brf_temp.fit(X_train_eng, y_train)
-            y_prob_brf_temp = brf_temp.predict_proba(X_test_eng)[:, 1]
-            auc_brf = roc_auc_score(y_test, y_prob_brf_temp)
-            for thr in np.linspace(0.30, 0.65, 36):
-                y_pred_brf_temp = (y_prob_brf_temp >= thr).astype(int)
-                acc = accuracy_score(y_test, y_pred_brf_temp)
-                rec = recall_score(y_test, y_pred_brf_temp)
-                if acc >= 0.60 and rec >= 0.70:
-                    score = acc * 0.30 + rec * 0.50 + auc_brf * 0.20
-                    if score > best_brf_score:
-                        best_brf_score = score
-                        best_brf_params = {
-                            "n_est": n_est,
-                            "max_d": max_d,
-                            "thr": thr,
-                        }
-    
-    if best_brf_params:
-        brf_model = BalancedRandomForestClassifier(
-            n_estimators=best_brf_params["n_est"],
-            max_depth=best_brf_params["max_d"],
-            min_samples_split=5,
-            min_samples_leaf=3,
-            random_state=42,
-            n_jobs=-1,
-        )
-        brf_thr = best_brf_params["thr"]
-    else:
-        brf_model = BalancedRandomForestClassifier(
-            n_estimators=500,
-            max_depth=12,
-            min_samples_split=5,
-            min_samples_leaf=3,
-            random_state=42,
-            n_jobs=-1,
-        )
-        brf_thr = 0.5
-    
-    brf_model.fit(X_train_eng, y_train)
-    y_prob_brf = brf_model.predict_proba(X_test_eng)[:, 1]
-    y_pred_brf = (y_prob_brf >= brf_thr).astype(int)
-
-    # HistGradientBoosting 튜닝
-    best_hgb_score = 0
-    best_hgb_params = None
-    for lr in [0.03, 0.05, 0.06, 0.08, 0.1]:
-        for max_d in [5, 6, 7, 8]:
-            for min_leaf in [20, 30, 40]:
-                hgb_temp = HistGradientBoostingClassifier(
-                    max_iter=500,
-                    learning_rate=lr,
-                    max_depth=max_d,
-                    min_samples_leaf=min_leaf,
-                    class_weight=weight_dict,
-                    random_state=42,
-                )
-                hgb_temp.fit(X_train_eng, y_train, sample_weight=sample_weight)
-                y_prob_hgb_temp = hgb_temp.predict_proba(X_test_eng)[:, 1]
-                auc_hgb = roc_auc_score(y_test, y_prob_hgb_temp)
-                for thr in np.linspace(0.30, 0.65, 36):
-                    y_pred_hgb_temp = (y_prob_hgb_temp >= thr).astype(int)
-                    acc = accuracy_score(y_test, y_pred_hgb_temp)
-                    rec = recall_score(y_test, y_pred_hgb_temp)
-                    if acc >= 0.60 and rec >= 0.70:
-                        score = acc * 0.30 + rec * 0.50 + auc_hgb * 0.20
-                        if score > best_hgb_score:
-                            best_hgb_score = score
-                            best_hgb_params = {
-                                "lr": lr,
-                                "max_d": max_d,
-                                "min_leaf": min_leaf,
-                                "thr": thr,
-                            }
-    
-    if best_hgb_params:
-        hgb_model = HistGradientBoostingClassifier(
-            max_iter=500,
-            learning_rate=best_hgb_params["lr"],
-            max_depth=best_hgb_params["max_d"],
-            min_samples_leaf=best_hgb_params["min_leaf"],
-            class_weight=weight_dict,
-            random_state=42,
-        )
-        hgb_thr = best_hgb_params["thr"]
-    else:
-        hgb_model = HistGradientBoostingClassifier(
-            max_iter=500,
-            learning_rate=0.06,
-            max_depth=7,
-            min_samples_leaf=30,
-            class_weight=weight_dict,
-            random_state=42,
-        )
-        hgb_thr = 0.5
-    
-    hgb_model.fit(X_train_eng, y_train, sample_weight=sample_weight)
-    y_prob_hgb = hgb_model.predict_proba(X_test_eng)[:, 1]
-    y_pred_hgb = (y_prob_hgb >= hgb_thr).astype(int)
-
-    # 앙상블 (LR + RF + HGB 가중 평균) - 3개 모델 앙상블
-    best_ensemble_score = 0
-    best_weights = None
-    best_ens_thr = best_thr
-
-    # 3개 모델 앙상블 탐색
-    for w1 in np.linspace(0.2, 0.6, 5):
-        for w2 in np.linspace(0.2, 0.6, 5):
-            w3 = 1.0 - w1 - w2
-            if w3 >= 0.1:  # 최소 10%는 HGB에 할당
-                ensemble_prob_temp = w1 * y_prob_lr + w2 * y_prob_rf + w3 * y_prob_hgb
-                auc_ens = roc_auc_score(y_test, ensemble_prob_temp)
-                for thr in np.linspace(0.30, 0.65, 36):
-                    y_pred_ens_temp = (ensemble_prob_temp >= thr).astype(int)
-                    acc = accuracy_score(y_test, y_pred_ens_temp)
-                    rec = recall_score(y_test, y_pred_ens_temp)
-                    if acc >= 0.60 and rec >= 0.70:
-                        score = acc * 0.30 + rec * 0.50 + auc_ens * 0.20
-                        if score > best_ensemble_score:
-                            best_ensemble_score = score
-                            best_weights = (float(w1), float(w2), float(w3))
-                            best_ens_thr = thr
-
-    if best_weights:
-        ensemble_prob = best_weights[0] * y_prob_lr + best_weights[1] * y_prob_rf + best_weights[2] * y_prob_hgb
-    else:
-        # 2개 모델 앙상블로 폴백
-        for w1 in np.linspace(0.3, 0.8, 6):
-            w2 = 1 - w1
-            ensemble_prob_temp = w1 * y_prob_lr + w2 * y_prob_rf
-            auc_ens = roc_auc_score(y_test, ensemble_prob_temp)
-            for thr in np.linspace(0.30, 0.65, 36):
-                y_pred_ens_temp = (ensemble_prob_temp >= thr).astype(int)
-                acc = accuracy_score(y_test, y_pred_ens_temp)
-                rec = recall_score(y_test, y_pred_ens_temp)
-                if acc >= 0.58 and rec >= 0.63:
-                    score = acc * 0.35 + rec * 0.45 + auc_ens * 0.20
-                    if score > best_ensemble_score:
-                        best_ensemble_score = score
-                        best_weights = (float(w1), float(w2), 0.0)
-                        best_ens_thr = thr
-        
-        if not best_weights:
-            best_weights = (0.5, 0.5, 0.0)
-            best_ens_thr = best_thr
-        
-        if best_weights[2] == 0.0:
-            ensemble_prob = best_weights[0] * y_prob_lr + best_weights[1] * y_prob_rf
-        else:
-            ensemble_prob = best_weights[0] * y_prob_lr + best_weights[1] * y_prob_rf + best_weights[2] * y_prob_hgb
-
-    y_pred_ens = (ensemble_prob >= best_ens_thr).astype(int)
-
-    # AUC 비교 및 ROC 곡선
-    model_aucs = {
-        "logistic": roc_auc_score(y_test, y_prob_lr),
-        "random_forest": roc_auc_score(y_test, y_prob_rf),
-        "balanced_random_forest": roc_auc_score(y_test, y_prob_brf),
-        "hist_gradient_boosting": roc_auc_score(y_test, y_prob_hgb),
-        "ensemble": roc_auc_score(y_test, ensemble_prob),
-    }
-    best_model_name = max(model_aucs, key=model_aucs.get)
-    best_auc = model_aucs[best_model_name]
-
-    if best_model_name == "logistic":
-        fpr_best, tpr_best, _ = roc_curve(y_test, y_prob_lr)
-    elif best_model_name == "random_forest":
-        fpr_best, tpr_best, _ = roc_curve(y_test, y_prob_rf)
-    elif best_model_name == "balanced_random_forest":
-        fpr_best, tpr_best, _ = roc_curve(y_test, y_prob_brf)
-    elif best_model_name == "hist_gradient_boosting":
-        fpr_best, tpr_best, _ = roc_curve(y_test, y_prob_hgb)
-    else:
-        fpr_best, tpr_best, _ = roc_curve(y_test, ensemble_prob)
-
+    # 8) 결과 정리 & JSON 저장 --------------------------------------------
     results = {
+        # 전체 수준 정보
         "threshold": float(best_thr),
         "optimal_c": float(best_c),
         "sample_size": int(len(data)),
+        # 로지스틱 모델 상세
         "logistic": {
             "accuracy": float(accuracy_score(y_test, y_pred_lr)),
             "recall": float(recall_score(y_test, y_pred_lr)),
@@ -398,56 +167,18 @@ def main():
                 precision_score(y_test, y_pred_lr, zero_division=0)
             ),
             "f1": float(f1_score(y_test, y_pred_lr)),
-            "auc": float(roc_auc_score(y_test, y_prob_lr)),
+            "auc": float(auc_lr),
             "threshold": float(best_thr),
             "optimal_c": float(best_c),
             "sample_size": int(len(data)),
             "coefficients": coef_dict,
             "odds_ratios": odds_ratio_dict,
-        },
-        "random_forest": {
-            "accuracy": float(accuracy_score(y_test, y_pred_rf)),
-            "recall": float(recall_score(y_test, y_pred_rf)),
-            "precision": float(
-                precision_score(y_test, y_pred_rf, zero_division=0)
-            ),
-            "f1": float(f1_score(y_test, y_pred_rf)),
-            "auc": float(roc_auc_score(y_test, y_prob_rf)),
-        },
-        "balanced_random_forest": {
-            "accuracy": float(accuracy_score(y_test, y_pred_brf)),
-            "recall": float(recall_score(y_test, y_pred_brf)),
-            "precision": float(
-                precision_score(y_test, y_pred_brf, zero_division=0)
-            ),
-            "f1": float(f1_score(y_test, y_pred_brf)),
-            "auc": float(roc_auc_score(y_test, y_prob_brf)),
-        },
-        "hist_gradient_boosting": {
-            "accuracy": float(accuracy_score(y_test, y_pred_hgb)),
-            "recall": float(recall_score(y_test, y_pred_hgb)),
-            "precision": float(
-                precision_score(y_test, y_pred_hgb, zero_division=0)
-            ),
-            "f1": float(f1_score(y_test, y_pred_hgb)),
-            "auc": float(roc_auc_score(y_test, y_prob_hgb)),
-        },
-        "ensemble": {
-            "accuracy": float(accuracy_score(y_test, y_pred_ens)),
-            "recall": float(recall_score(y_test, y_pred_ens)),
-            "precision": float(
-                precision_score(y_test, y_pred_ens, zero_division=0)
-            ),
-            "f1": float(f1_score(y_test, y_pred_ens)),
-            "auc": float(roc_auc_score(y_test, ensemble_prob)),
-            "threshold": float(best_ens_thr),
-            "weights": [float(best_weights[0]), float(best_weights[1]), float(best_weights[2]) if len(best_weights) > 2 else 0.0],
-        },
-        "roc_curve": {
-            "fpr": fpr_best.tolist(),
-            "tpr": tpr_best.tolist(),
-            "auc": float(best_auc),
-            "model_name": best_model_name,
+            "odds_summary": odds_summary,  # 👈 대시보드에서 바로 쓰기 좋게
+            "roc_curve": {
+                "fpr": fpr_lr.tolist(),
+                "tpr": tpr_lr.tolist(),
+                "thresholds": thr_roc.tolist(),
+            },
         },
     }
 
@@ -459,5 +190,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
