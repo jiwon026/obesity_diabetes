@@ -927,138 +927,125 @@ with tab3:
                 st.plotly_chart(fig, use_container_width=True)
 
             # 2) BMI 구간별 당뇨 유병률
+            # ============================
+            # 📊 BMI 구간별 당뇨 유병률 (Plotly)
+            # ============================
+            
             st.subheader("BMI 구간별 당뇨 유병률")
+            
             bmi_plot_df = filtered_df[["BMI", "DIABETES"]].dropna()
+            
             if len(bmi_plot_df) > 0:
+            
                 bins = [0, 18.5, 23, 25, 30, np.inf]
                 labels = ["저체중", "정상", "과체중", "비만", "고도비만"]
-
-                bmi_plot_df["BMI_GROUP"] = pd.cut(
-                    bmi_plot_df["BMI"], bins=bins, labels=labels, right=False
-                )
-
+            
+                bmi_plot_df["BMI_GROUP"] = pd.cut(bmi_plot_df["BMI"], bins=bins, labels=labels)
+            
                 grp = bmi_plot_df.groupby("BMI_GROUP")
-                n_per_group = grp.size()
-                diab_rate = grp["DIABETES"].mean() * 100  # %
+                diab_rate = grp["DIABETES"].mean() * 100
+                n_vals = grp.size()
+            
+                result_df = pd.DataFrame({
+                    "BMI 구간": labels,
+                    "당뇨 유병률(%)": [diab_rate.get(lbl, np.nan) for lbl in labels],
+                    "n": [n_vals.get(lbl, 0) for lbl in labels]
+                })
+            
+                fig = px.bar(
+                    result_df,
+                    x="BMI 구간",
+                    y="당뇨 유병률(%)",
+                    color="BMI 구간",
+                    text=result_df.apply(lambda r: f"{r['당뇨 유병률(%)']:.2f}%<br>(n={r['n']:,})", axis=1),
+                    title="BMI 구간별 당뇨 유병률 (Plotly)",
+                    color_discrete_sequence=px.colors.sequential.Sunset
+                )
+            
+                fig.update_traces(textposition="outside")
+                st.plotly_chart(fig, use_container_width=True)
 
-                x_labels = labels
-                y_vals = [diab_rate.get(lbl, np.nan) for lbl in x_labels]
-                n_vals = [n_per_group.get(lbl, 0) for lbl in x_labels]
 
-                fig_bmi, ax_bmi = plt.subplots(figsize=(6, 6))
-                colors = ["#b3e5fc", "#c8e6c9", "#fff9c4", "#ffcc80", "#ff8a65"]
-
-                bars = ax_bmi.bar(x_labels, y_vals, color=colors)
-
-                ax_bmi.set_ylim(0, max(y for y in y_vals if not pd.isna(y)) * 1.2)
-                ax_bmi.set_ylabel("당뇨 유병률 (%)", fontsize=11)
-                ax_bmi.set_xlabel("BMI 구간", fontsize=11)
-                ax_bmi.set_title("BMI 구간별 당뇨 유병률", fontsize=13, fontweight="bold")
-
-                for bar, rate, n in zip(bars, y_vals, n_vals):
-                    if pd.isna(rate):
-                        continue
-                    ax_bmi.text(
-                        bar.get_x() + bar.get_width() / 2,
-                        bar.get_height() + 0.5,
-                        f"{rate:.2f}%\n(n={n:,})",
-                        ha="center",
-                        va="bottom",
-                        fontsize=9,
-                    )
-
-                st.pyplot(fig_bmi)
-            else:
-                st.info("BMI와 당뇨 정보가 충분하지 않아 BMI 구간별 유병률을 계산할 수 없습니다.")
-
-            # 3) 연도별 비만율과 당뇨 유병률 추이 + 추세선
-            st.subheader("연도별 비만율과 당뇨 유병률 추이")
+            # ============================================
+            # 📈 연도별 비만율 & 당뇨 유병률 추이 + 추세선 (Plotly)
+            # ============================================
+            
+            st.subheader("연도별 비만율과 당뇨 유병률 추이 (Plotly)")
+            
             trend_df = filtered_df[["YEAR", "BMI", "DIABETES"]].dropna()
+            
             if len(trend_df) > 0:
                 trend_df["OBESE"] = (trend_df["BMI"] >= 25).astype(int)
-
-                yearly = (
-                    trend_df.groupby("YEAR")
-                    .agg(
-                        obesity_rate=("OBESE", lambda s: s.mean() * 100),
-                        diabetes_rate=("DIABETES", lambda s: s.mean() * 100),
-                        n=("OBESE", "size"),
-                    )
-                    .reset_index()
+            
+                yearly = trend_df.groupby("YEAR").agg(
+                    obesity_rate=("OBESE", lambda s: s.mean() * 100),
+                    diabetes_rate=("DIABETES", lambda s: s.mean() * 100)
+                ).reset_index()
+            
+                # 두 지표를 동시에 표시하기 위해 secondary_y 사용
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+                # 비만율
+                fig.add_trace(
+                    go.Scatter(
+                        x=yearly["YEAR"],
+                        y=yearly["obesity_rate"],
+                        mode="markers+lines",
+                        name="비만율 (%)",
+                        marker=dict(color="orange")
+                    ),
+                    secondary_y=False
                 )
-
-                years = yearly["YEAR"].values.astype(float)
-                ob_rate = yearly["obesity_rate"].values
-                dm_rate = yearly["diabetes_rate"].values
-
-                ob_coef = np.polyfit(years, ob_rate, 1)
-                dm_coef = np.polyfit(years, dm_rate, 1)
-                ob_line = np.poly1d(ob_coef)
-                dm_line = np.poly1d(dm_coef)
-                x_line = np.linspace(years.min(), years.max(), 100)
-
-                fig_trend, ax1 = plt.subplots(figsize=(7, 6))
-
-                ax1.scatter(years, ob_rate, color="orange", label="비만율 (%)")
-                ax1.plot(
-                    x_line,
-                    ob_line(x_line),
-                    "--",
-                    color="orange",
-                    label="비만율 추세선",
+            
+                # 비만율 추세선
+                ob_coef = np.polyfit(yearly["YEAR"], yearly["obesity_rate"], 1)
+                fig.add_trace(
+                    go.Scatter(
+                        x=yearly["YEAR"],
+                        y=np.poly1d(ob_coef)(yearly["YEAR"]),
+                        mode="lines",
+                        line=dict(color="orange", dash="dash"),
+                        name=f"비만율 추세선 (y={ob_coef[0]:.3f}x+{ob_coef[1]:.2f})"
+                    ),
+                    secondary_y=False
                 )
-                ax1.set_xlabel("연도", fontsize=11)
-                ax1.set_ylabel("비만율 (%)", fontsize=11, color="orange")
-                ax1.tick_params(axis="y", labelcolor="orange")
+            
+                # 당뇨 유병률
+                fig.add_trace(
+                    go.Scatter(
+                        x=yearly["YEAR"],
+                        y=yearly["diabetes_rate"],
+                        mode="markers+lines",
+                        name="당뇨 유병률 (%)",
+                        marker=dict(color="red")
+                    ),
+                    secondary_y=True
+                )
+            
+                # 당뇨 추세선
+                dm_coef = np.polyfit(yearly["YEAR"], yearly["diabetes_rate"], 1)
+                fig.add_trace(
+                    go.Scatter(
+                        x=yearly["YEAR"],
+                        y=np.poly1d(dm_coef)(yearly["YEAR"]),
+                        mode="lines",
+                        line=dict(color="red", dash="dash"),
+                        name=f"당뇨 추세선 (y={dm_coef[0]:.3f}x+{dm_coef[1]:.2f})"
+                    ),
+                    secondary_y=True
+                )
+            
+                fig.update_layout(
+                    title="연도별 비만율과 당뇨 유병률 추이",
+                    xaxis_title="연도",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.1)
+                )
+            
+                fig.update_yaxes(title_text="비만율 (%)", secondary_y=False)
+                fig.update_yaxes(title_text="당뇨 유병률 (%)", secondary_y=True)
+            
+                st.plotly_chart(fig, use_container_width=True)
 
-                ax2 = ax1.twinx()
-                ax2.scatter(
-                    years, dm_rate, color="red", marker="s", label="당뇨 유병률 (%)"
-                )
-                ax2.plot(
-                    x_line,
-                    dm_line(x_line),
-                    "--",
-                    color="red",
-                    label="당뇨 유병률 추세선",
-                )
-                ax2.set_ylabel("당뇨 유병률 (%)", fontsize=11, color="red")
-                ax2.tick_params(axis="y", labelcolor="red")
-
-                fig_trend.suptitle(
-                    "연도별 비만율과 당뇨 유병률 추이", fontsize=13, fontweight="bold"
-                )
-
-                lines1, labels1 = ax1.get_legend_handles_labels()
-                lines2, labels2 = ax2.get_legend_handles_labels()
-                ax1.legend(
-                    lines1 + lines2,
-                    labels1 + labels2,
-                    loc="upper left",
-                    fontsize=9,
-                    framealpha=0.9,
-                )
-
-                ob_a, ob_b = ob_coef
-                dm_a, dm_b = dm_coef
-                text_box = (
-                    f"비만율 추세선: y = {ob_a:.3f}x + {ob_b:.2f}\n"
-                    f"당뇨 유병률 추세선: y = {dm_a:.3f}x + {dm_b:.2f}"
-                )
-                ax1.text(
-                    0.95,
-                    0.05,
-                    text_box,
-                    transform=ax1.transAxes,
-                    ha="right",
-                    va="bottom",
-                    fontsize=9,
-                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-                )
-
-                st.pyplot(fig_trend)
-            else:
-                st.info("연도, BMI, 당뇨 정보가 충분하지 않아 추세를 계산할 수 없습니다.")
 
             # 4) 성별 당뇨 발병률 비교 (기존 코드)
             st.subheader("📊 성별 당뇨 발병률 비교")
