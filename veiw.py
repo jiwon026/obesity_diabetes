@@ -250,6 +250,7 @@ def load_new_data():
     except FileNotFoundError:
         return pd.DataFrame()
 
+    # 1) 분석/대시보드용 한글/대문자 컬럼명으로 매핑
     df_new = df_new.rename(
         columns={
             "year": "YEAR",
@@ -275,15 +276,30 @@ def load_new_data():
         }
     )
 
+    # 2) 가족력 변수 통합
     if "DM_FH1" in df_new.columns and "DM_FH2" in df_new.columns:
         df_new["DM_FH"] = (
             (df_new["DM_FH1"] == 1) | (df_new["DM_FH2"] == 1)
         ).astype(int)
 
+    # 3) 파생 변수 (예: BMI*AGE)
     if "BMI" in df_new.columns and "AGE" in df_new.columns:
         df_new["BMI_Age_Int"] = df_new["BMI"] * df_new["AGE"]
 
+    # 4) ✅ pkl 모델이 학습될 때 사용한 "원래 이름" 컬럼들도 다시 만들어주기
+    #    (모델은 이 이름들을 기준으로 coef들을 가지고 있음)
+    if {"AGE", "SEX", "BMI", "SBP", "DBP", "HDL", "BREAKFAST"}.issubset(df_new.columns):
+        df_new["age"] = df_new["AGE"]
+        df_new["sex"] = df_new["SEX"]
+        df_new["HE_BMI"] = df_new["BMI"]
+        df_new["HE_sbp"] = df_new["SBP"]
+        df_new["HE_dbp"] = df_new["DBP"]
+        df_new["HE_HDL_st2"] = df_new["HDL"]
+        df_new["L_BR_FQ"] = df_new["BREAKFAST"]
+        # HE_TG는 rename에서 이름을 안 바꿨으니 원래대로 df_new["HE_TG"]로 이미 존재할 것
+
     return df_new
+
 
 
 # 데이터 로드
