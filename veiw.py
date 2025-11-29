@@ -347,7 +347,6 @@ else:
     df["NET_DIET_SCORE"] = np.nan
 
 # ⚡️ pkl에서 모델 로드 & 성능 계산
-logit_model = load_saved_logit_model(MODEL_PATH)
 adult_model_results_global = compute_adult_model_results(df_new, logit_model)
 adult_model_summary_global = (
     adult_model_results_global.get("metrics") if adult_model_results_global else None
