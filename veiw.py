@@ -15,6 +15,7 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     roc_auc_score,
+    roc_curve
 )
 import statsmodels.api as sm
 import pickle
