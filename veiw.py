@@ -298,8 +298,8 @@ st.set_page_config(
 )
 
 # 한글 폰트 설정
-plt.rcParams['font.family'] = 'AppleGothic'
-plt.rcParams['axes.unicode_minus'] = False
+#plt.rcParams['font.family'] = 'AppleGothic'
+#plt.rcParams['axes.unicode_minus'] = False
 
 # 사이드바 - 데이터셋 선택
 st.sidebar.header("📊 데이터셋 선택")
