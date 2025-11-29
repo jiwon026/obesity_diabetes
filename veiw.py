@@ -197,7 +197,7 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     used_t = ADULT_MODEL_THRESHOLD
 
     # 4) 최종 예측
-    y_pred = (y_prob >= best_t).astype(int)
+    y_pred = (y_prob >= used_t).astype(int)
 
     # 5) 성능 지표
     metrics = {
