@@ -110,7 +110,19 @@ def get_br_fq_select_options():
 
 
 def prepare_adult_model_data(df):
-    req = ["DIABETES", "AGE", "SEX", "BMI", "SBP", "DBP", "HDL", "DM_FH", "BREAKFAST"]
+    # ✅ pkl 학습 때 사용한 컬럼 이름 기준
+    req = [
+        "DIABETES",
+        "age",
+        "sex",
+        "HE_BMI",
+        "HE_sbp",
+        "HE_dbp",
+        "HE_TG",
+        "HE_HDL_st2",
+        "DM_FH",
+        "L_BR_FQ",
+    ]
     if not set(req).issubset(df.columns):
         return None
 
@@ -125,10 +137,6 @@ def prepare_adult_model_data(df):
 
 
 def compute_adult_model_results(dataframe: pd.DataFrame, model):
-    """
-    이미 학습된 로지스틱 회귀 모델(pkl에서 로드한 것)을 이용해서
-    성능 지표와 오즈비를 계산해서 반환합니다.
-    """
     if model is None:
         return None
 
@@ -136,23 +144,12 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     if not prep:
         return None
 
-    # -----------------------------
-    # ① 데이터 준비
-    # -----------------------------
     X, y = prep["X"], prep["y"]
 
-    # 모델이 학습될 때 사용한 변수 기준으로 재인덱싱
-    X_pred = X.reindex(columns=model.params.index).fillna(0)
-
-    # -----------------------------
-    # ② 예측
-    # -----------------------------
-    y_prob = model.predict(X_pred)
+    # 이름이 이미 model.params.index와 같으므로 그대로 사용
+    y_prob = model.predict(X)
     y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
-    # -----------------------------
-    # ③ 성능 계산
-    # -----------------------------
     metrics = {
         "accuracy": accuracy_score(y, y_pred),
         "recall": recall_score(y, y_pred, zero_division=0),
@@ -163,25 +160,19 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
         "sample_size": len(y),
     }
 
-    # -----------------------------
-    # ④ 오즈비 계산
-    # -----------------------------
     odds_ratios = np.exp(model.params)
     coef_df = pd.DataFrame(
         {"Coef": model.params, "OR": odds_ratios, "P-value": model.pvalues}
     )
 
-    # -----------------------------
-    # ⑤ 결과 패키징
-    # -----------------------------
     results = {
         "metrics": metrics,
-        "odds_summary": coef_df.to_dict("index"),
+            "odds_summary": coef_df.to_dict("index"),
         "model_params": model.params.to_dict(),
         "model_cols": prep["columns"],
     }
-
     return results
+
 
 
 
