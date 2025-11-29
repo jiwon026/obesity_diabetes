@@ -25,7 +25,7 @@ TEEN_OBESITY_PERCENTILE = 0.95
 TEEN_MODEL_THRESHOLD = 0.49
 ADULT_MODEL_THRESHOLD = 0.1667  # 기본값(이후에 덮어씀)
 ADULT_DEFAULT_HDL = 53.50
-MODEL_PATH = "logit_model.pkl1"
+MODEL_PATH = "logit_model1.pkl"
 
 # ======================================================================
 # 🔐 pkl에서 모델 + threshold + columns 로드
