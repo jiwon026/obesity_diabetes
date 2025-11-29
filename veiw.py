@@ -1,4 +1,7 @@
 from typing import Dict, Optional
+import os
+import json
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -113,6 +116,21 @@ def prepare_teen_model_data(
         "y_test": y_test,
         "sample_size": len(data),
     }
+
+
+def load_teen_model_results_from_file(path: str = "teen_model_results.json"):
+    """
+    미리 계산해 둔 청소년 비만 예측 모델 결과를 파일에서 불러옵니다.
+    - Streamlit 실행 시마다 모델을 다시 학습하지 않도록 속도 최적화용.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception:
+        return None
 
 
 def compute_teen_model_results(dataframe: pd.DataFrame):
@@ -447,9 +465,10 @@ else:
     df['UNHEALTHY_SCORE'] = np.nan
     df['NET_DIET_SCORE'] = np.nan
 
-teen_model_results_global = compute_teen_model_results(df) if not df.empty else None
+# ⚡️ 모델은 앱 실행 시 매번 학습하지 않고, 미리 저장된 결과만 불러옵니다.
+teen_model_results_global = load_teen_model_results_from_file()
 teen_model_summary_global = (
-    teen_model_results_global["logistic"] if teen_model_results_global else None
+    teen_model_results_global.get("logistic") if teen_model_results_global else None
 )
 
 # 사이드바 - 데이터셋 선택
@@ -892,6 +911,36 @@ with tab3:
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                     )
                     st.plotly_chart(fig, use_container_width=True)
+
+                    # 전년도 대비 비만율 증가폭(퍼센트포인트) 시각화
+                    year_delta = year_obesity_all[['YEAR', '비만율']].copy()
+                    year_delta['증가폭'] = year_delta['비만율'].diff()
+                    year_delta = year_delta.dropna()
+
+                    if len(year_delta) > 0:
+                        st.markdown("#### 📊 연도별 청소년 비만율 증가폭 (전년도 대비)")
+                        fig_delta = px.bar(
+                            year_delta,
+                            x='YEAR',
+                            y='증가폭',
+                            labels={'YEAR': '연도', '증가폭': '증가폭 (퍼센트포인트)'},
+                            title='연도별 청소년 비만율 증가폭 (전년도 대비)',
+                            color='증가폭',
+                            color_continuous_scale='RdBu_r',
+                        )
+                        fig_delta.update_layout(coloraxis_showscale=False)
+                        st.plotly_chart(fig_delta, use_container_width=True)
+
+                        st.dataframe(
+                            year_delta.rename(
+                                columns={
+                                    'YEAR': '연도',
+                                    '비만율': '비만율 (%)',
+                                    '증가폭': '전년도 대비 증가폭 (pp)',
+                                }
+                            ).round(2),
+                            use_container_width=True,
+                        )
         else:
             bmi_obesity_data = filtered_df[['YEAR', 'SEX', 'BMI']].dropna()
             if len(bmi_obesity_data) > 0:
@@ -994,40 +1043,112 @@ with tab3:
                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                         )
                         st.plotly_chart(fig, use_container_width=True)
+
+                    # 성별 당뇨 발병률 비교 (바 차트)
+                    st.subheader("📊 성별 당뇨 발병률 비교")
+                    
+                    diabetes_sex_data = filtered_df[['SEX', 'DIABETES']].dropna()
+                    if len(diabetes_sex_data) > 0:
+                        sex_diabetes_rates = {}
+                        
+                        # 전체 (1.0 = 당뇨병)
+                        total_diabetes = (diabetes_sex_data['DIABETES'] == 1.0).sum()
+                        sex_diabetes_rates['전체'] = (total_diabetes / len(diabetes_sex_data)) * 100
+                        
+                        # 남성
+                        male_data = diabetes_sex_data[diabetes_sex_data['SEX'] == 1.0]
+                        if len(male_data) > 0:
+                            male_diabetes = (male_data['DIABETES'] == 1.0).sum()
+                            sex_diabetes_rates['남성'] = (male_diabetes / len(male_data)) * 100
+                        
+                        # 여성
+                        female_data = diabetes_sex_data[diabetes_sex_data['SEX'] == 2.0]
+                        if len(female_data) > 0:
+                            female_diabetes = (female_data['DIABETES'] == 1.0).sum()
+                            sex_diabetes_rates['여성'] = (female_diabetes / len(female_data)) * 100
+                        
+                        if len(sex_diabetes_rates) > 0:
+                            fig = px.bar(
+                                x=list(sex_diabetes_rates.keys()),
+                                y=list(sex_diabetes_rates.values()),
+                                labels={'x': '성별', 'y': '당뇨 발병률 (%)'},
+                                title='성별 당뇨 발병률 비교',
+                                color=list(sex_diabetes_rates.keys()),
+                                color_discrete_map={'전체': 'purple', '남성': '#ff9999', '여성': '#66b3ff'}
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+
+    # 👇 추가: 전체 청소년 기준 BMI 트렌드 (필터와 무관)
+    if not is_adult and 'TEEN_OBESE_TOP5' in df.columns:
+        st.markdown("---")
+        st.subheader("📈 청소년 BMI 트렌드 (2015-2016 제외)")
+
+        if True:
+            # Mean BMI, 95th percentile BMI, Top 5% Obesity Share 복합 그래프
+            teen_bmi_trend = df[['YEAR', 'BMI', 'TEEN_OBESE_TOP5']].dropna()
+            if len(teen_bmi_trend) > 0:
+                year_stats = teen_bmi_trend.groupby('YEAR').agg({
+                    'BMI': ['mean', lambda x: x.quantile(0.95)],
+                    'TEEN_OBESE_TOP5': 'mean'
+                }).reset_index()
+                year_stats.columns = ['YEAR', 'Mean_BMI', 'P95_BMI', 'Obesity_Share']
+                year_stats['Obesity_Share'] *= 100
+                year_stats = year_stats.sort_values('YEAR')
                 
-                # 성별 당뇨 발병률 비교 (바 차트)
-                st.subheader("📊 성별 당뇨 발병률 비교")
-                
-                diabetes_sex_data = filtered_df[['SEX', 'DIABETES']].dropna()
-                if len(diabetes_sex_data) > 0:
-                    sex_diabetes_rates = {}
+                if len(year_stats) > 0:
+                    from plotly.subplots import make_subplots
                     
-                    # 전체 (1.0 = 당뇨병)
-                    total_diabetes = (diabetes_sex_data['DIABETES'] == 1.0).sum()
-                    sex_diabetes_rates['전체'] = (total_diabetes / len(diabetes_sex_data)) * 100
+                    fig_all = make_subplots(specs=[[{"secondary_y": True}]])
                     
-                    # 남성
-                    male_data = diabetes_sex_data[diabetes_sex_data['SEX'] == 1.0]
-                    if len(male_data) > 0:
-                        male_diabetes = (male_data['DIABETES'] == 1.0).sum()
-                        sex_diabetes_rates['남성'] = (male_diabetes / len(male_data)) * 100
+                    # Mean BMI (파란 선)
+                    fig_all.add_trace(
+                        go.Scatter(
+                            x=year_stats['YEAR'],
+                            y=year_stats['Mean_BMI'],
+                            mode='lines+markers',
+                            name='Mean BMI',
+                            line=dict(color='blue', width=3),
+                            marker=dict(size=8, symbol='circle')
+                        ),
+                        secondary_y=False,
+                    )
                     
-                    # 여성
-                    female_data = diabetes_sex_data[diabetes_sex_data['SEX'] == 2.0]
-                    if len(female_data) > 0:
-                        female_diabetes = (female_data['DIABETES'] == 1.0).sum()
-                        sex_diabetes_rates['여성'] = (female_diabetes / len(female_data)) * 100
+                    # 95th percentile BMI (주황 선)
+                    fig_all.add_trace(
+                        go.Scatter(
+                            x=year_stats['YEAR'],
+                            y=year_stats['P95_BMI'],
+                            mode='lines+markers',
+                            name='95th percentile BMI',
+                            line=dict(color='orange', width=3),
+                            marker=dict(size=8, symbol='square')
+                        ),
+                        secondary_y=False,
+                    )
                     
-                    if len(sex_diabetes_rates) > 0:
-                        fig = px.bar(
-                            x=list(sex_diabetes_rates.keys()),
-                            y=list(sex_diabetes_rates.values()),
-                            labels={'x': '성별', 'y': '당뇨 발병률 (%)'},
-                            title='성별 당뇨 발병률 비교',
-                            color=list(sex_diabetes_rates.keys()),
-                            color_discrete_map={'전체': 'purple', '남성': '#ff9999', '여성': '#66b3ff'}
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
+                    # Top 5% Obesity Share (회색 막대)
+                    fig_all.add_trace(
+                        go.Bar(
+                            x=year_stats['YEAR'],
+                            y=year_stats['Obesity_Share'],
+                            name='Top 5% Obesity Share (%)',
+                            marker_color='lightgray',
+                            opacity=0.7
+                        ),
+                        secondary_y=True,
+                    )
+                    
+                    fig_all.update_xaxes(title_text="Year")
+                    fig_all.update_yaxes(title_text="BMI", secondary_y=False, range=[20, 30])
+                    fig_all.update_yaxes(title_text="Obesity Share (%)", secondary_y=True, range=[0, 7])
+                    
+                    fig_all.update_layout(
+                        title="Teen BMI Trend (2015-2016 excluded)",
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        height=500
+                    )
+                    
+                    st.plotly_chart(fig_all, use_container_width=True, key="teen_bmi_trend_combo")
             
             # 비만과 당뇨의 상관관계 시각화
             if 'OBESITY' in filtered_df.columns and 'DIABETES' in filtered_df.columns:
@@ -1294,7 +1415,7 @@ with tab3:
                         color_continuous_scale='Oranges'
                     )
                     fig.update_layout(showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key="youth_fruit_freq")
     
     with col2:
         # 채소 섭취 빈도
@@ -1310,7 +1431,7 @@ with tab3:
                     color_continuous_scale='Greens'
                 )
                 fig.update_layout(showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="youth_veg_freq")
     
     col3, col4 = st.columns(2)
     
@@ -1395,7 +1516,7 @@ with tab3:
                     color_discrete_sequence=['orange']
                 )
                 fig.update_traces(line_width=3, marker_size=8)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="teen_fruit_trend")
         
         with col2:
             if 'F_VEG' in year_food_data.columns:
@@ -1408,7 +1529,7 @@ with tab3:
                     color_discrete_sequence=['green']
                 )
                 fig.update_traces(line_width=3, marker_size=8)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="teen_veg_trend")
         
         col3, col4 = st.columns(2)
         
@@ -1423,7 +1544,7 @@ with tab3:
                     color_discrete_sequence=['red']
                 )
                 fig.update_traces(line_width=3, marker_size=8)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="teen_fastfood_trend")
         
         # 아침식사 연도별 추이
         if 'Breakfast_Category' in filtered_df.columns:
@@ -1447,7 +1568,7 @@ with tab3:
                         ticktext=[breakfast_labels_map.get(v, str(v)) for v in [0.0, 1.0, 2.0, 3.0]]
                     )
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="teen_breakfast_trend")
         
         with col4:
             if 'SODA_INTAKE' in year_food_data.columns:
@@ -1460,7 +1581,7 @@ with tab3:
                     color_discrete_sequence=['purple']
                 )
                 fig.update_traces(line_width=3, marker_size=8)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, key="teen_soda_trend")
         
         # 전체 식습관 비교 (하나의 그래프에 모든 항목)
         st.subheader("📊 연도별 식습관 종합 비교")
