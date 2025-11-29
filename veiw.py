@@ -1046,31 +1046,45 @@ with tab3:
                 ob_a, ob_b = ob_coef
                 dm_a, dm_b = dm_coef
                 eq_text = (
-                    f"비만율: y = {ob_a:.3f}x + {ob_b:.2f}   |   "
-                    f"당뇨 유병률: y = {dm_a:.3f}x + {dm_b:.2f}"
-                )
-            
-                fig.add_annotation(
-                    x=0.5, y=-0.22,
-                    xref="paper", yref="paper",
-                    showarrow=False,
-                    text=eq_text,
-                    font=dict(size=10),
-                    align="center",
+                    f"비만율 추세선: y = {ob_a:.3f}x + {ob_b:.2f}<br>"
+                    f"당뇨 추세선: y = {dm_a:.3f}x + {dm_b:.2f}"
                 )
             
                 fig.update_layout(
                     title="연도별 비만율과 당뇨 유병률 추이",
                     title_x=0.5,
                     xaxis_title="연도",
+                    # ✅ 범례를 그래프 안 왼쪽 위로
                     legend=dict(
-                        orientation="h",
+                        orientation="v",
+                        x=0.02,
+                        y=0.98,
+                        xanchor="left",
                         yanchor="top",
-                        y=-0.12,        # 그래프 아래로 내리기
-                        xanchor="center",
-                        x=0.5,
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="rgba(0,0,0,0.2)",
+                        borderwidth=1,
+                        font=dict(size=10),
                     ),
-                    margin=dict(t=60, b=100),
+                    margin=dict(t=60, b=40, l=60, r=60),
+                )
+            
+                # ✅ 추세선 식을 그래프 안 오른쪽 아래에 박스로 표시
+                fig.add_annotation(
+                    x=0.98,
+                    y=0.05,
+                    xref="paper",
+                    yref="paper",
+                    xanchor="right",
+                    yanchor="bottom",
+                    showarrow=False,
+                    text=eq_text,
+                    font=dict(size=9),
+                    align="right",
+                    bordercolor="rgba(0,0,0,0.3)",
+                    borderwidth=1,
+                    borderpad=4,
+                    bgcolor="rgba(255,255,255,0.9)",
                 )
             
                 fig.update_yaxes(title_text="비만율 (%)", secondary_y=False)
