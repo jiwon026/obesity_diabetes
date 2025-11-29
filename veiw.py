@@ -25,7 +25,21 @@ TEEN_OBESITY_PERCENTILE = 0.95
 TEEN_MODEL_THRESHOLD = 0.49
 ADULT_MODEL_THRESHOLD = 0.1667  # F1 최적화 임계값
 ADULT_DEFAULT_HDL = 53.50  # 평균 HDL-C 값
-MODEL_PATH = "logit_model.pkl"  # 미리 학습해서 저장해 둔 모델 경로
+# === PKL 로드 (모델 + threshold + columns) ===
+try:
+    with open("logit_model.pkl", "rb") as f:
+        loaded = pickle.load(f)
+
+    logit_model = loaded["model"]
+    ADULT_MODEL_THRESHOLD = loaded["threshold"]
+    TRAIN_COLUMNS = loaded["columns"]
+
+except Exception as e:
+    st.error(f"[ERROR] 모델 로드 실패: {e}")
+    logit_model = None
+    ADULT_MODEL_THRESHOLD = 0.5
+    TRAIN_COLUMNS = []
+
 
 # ==============================================================================
 # 📝 모델 로드 및 준비 함수 (Model Persistence Logic)
@@ -152,10 +166,10 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
 
     # 🔥 모델이 학습될 때 사용한 변수 순서에 맞추고,
     #    없는 컬럼이 생기면 0으로 채워서 NaN이 안 생기게 함
-    X_aligned = X.reindex(columns=model.params.index).fillna(0)
+    X_aligned = X.reindex(columns=TRAIN_COLUMNS).fillna(0)
 
     # 예측
-    y_prob = model.predict(X_aligned)
+    y_prob = logit_model.predict(X_aligned)
     y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
     metrics = {
@@ -220,10 +234,10 @@ def predict_diabetes_risk_final(
     })
 
     # 3. 모델이 가진 파라미터 순서에 맞추기
-    new_data = new_data.reindex(columns=model.params.index).fillna(0)
+    new_data = new_data.reindex(columns=TRAIN_COLUMNS).fillna(0)
 
     # 4. 예측
-    prediction_prob = model.predict(new_data)[0]
+    prediction_prob = logit_model.predict(new_data)[0]
 
     return bmi, obe_level, prediction_prob, hdl
 
