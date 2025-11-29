@@ -172,7 +172,7 @@ def find_best_threshold(y_true, y_prob, metric: str = "f1"):
 def compute_adult_model_results(dataframe: pd.DataFrame, model):
     """
     이미 학습된 로지스틱 회귀 모델(pkl에서 로드한 것)을 이용해서
-    성능 지표와 오즈비를 계산해서 반환합니다.
+    성능 지표, 오즈비, ROC 곡선을 계산해서 반환합니다.
     """
     if model is None:
         return None
@@ -183,22 +183,23 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
 
     X, y = prep["X"], prep["y"]
 
-    # 학습 시 사용된 컬럼 순서(TRAIN_COLUMNS)에 맞게 정렬
+    # 1) 학습 시 사용된 컬럼 순서(TRAIN_COLUMNS)에 맞게 정렬
     if TRAIN_COLUMNS:
         X_aligned = X.reindex(columns=TRAIN_COLUMNS).fillna(0)
     else:
         # pkl에 columns 정보가 없다면 model.params 기준으로라도 맞추기
         X_aligned = X.reindex(columns=model.params.index).fillna(0)
 
-    # 확률 예측
+    # 2) 확률 예측
     y_prob = model.predict(X_aligned)
 
-    # F1 기준 최적 임계값 탐색
+    # 3) F1 기준 최적 임계값 탐색
     best_t, best_f1 = find_best_threshold(y, y_prob, metric="f1")
 
-    # 최종 예측
+    # 4) 최종 예측
     y_pred = (y_prob >= best_t).astype(int)
 
+    # 5) 성능 지표
     metrics = {
         "accuracy": accuracy_score(y, y_pred),
         "recall": recall_score(y, y_pred, zero_division=0),
@@ -208,33 +209,30 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
         "threshold": float(best_t),
         "sample_size": len(y),
     }
-    # ROC curve 좌표 계산
+
+    # 6) 오즈비 / 계수 테이블 (모델 자체 기준)
+    odds_ratios = np.exp(model.params)
+    coef_df = pd.DataFrame(
+        {
+            "Coef": model.params,
+            "OR": odds_ratios,
+            "P-value": model.pvalues,
+        }
+    )
+
+    # 7) ROC curve 좌표 계산
     fpr, tpr, roc_thresholds = roc_curve(y, y_prob)
-    
+
     results = {
         "metrics": metrics,
         "odds_summary": coef_df.to_dict("index"),
         "model_params": model.params.to_dict(),
         "model_cols": prep["columns"],
-        "roc_curve": {           # 👈 ROC 좌표도 같이 저장
+        "roc_curve": {  # ROC 좌표
             "fpr": fpr.tolist(),
             "tpr": tpr.tolist(),
             "thresholds": roc_thresholds.tolist(),
         },
-    }
-    return results
-
-    # 오즈비 및 계수
-    odds_ratios = np.exp(model.params)
-    coef_df = pd.DataFrame(
-        {"Coef": model.params, "OR": odds_ratios, "P-value": model.pvalues}
-    )
-
-    results = {
-        "metrics": metrics,
-        "odds_summary": coef_df.to_dict("index"),
-        "model_params": model.params.to_dict(),
-        "model_cols": prep["columns"],
     }
     return results
 
