@@ -1347,48 +1347,48 @@ with tab6:
                 odds_df.index = [feature_map.get(idx, idx) for idx in odds_df.index]
                 odds_df = odds_df.sort_values("오즈비(OR)", ascending=False)
                 st.dataframe(odds_df, use_container_width=True)
-                    # =============================
-                    # 🔍 오즈비(OR) 상위 4–5개 시각화
-                    # =============================
-                    # OR이 1보다 큰(위험을 높이는) 요인 중에서 상위 5개 선택
-                    or_df = odds_df.copy()
-                    or_df_pos = or_df[or_df["오즈비(OR)"] > 1]
-                
-                    if len(or_df_pos) == 0:
-                        st.info("오즈비가 1을 초과하는 위험 요인이 없어 상위 요인을 시각화할 수 없습니다.")
-                    else:
-                        top_k = min(5, len(or_df_pos))
-                        top_or = (
-                            or_df_pos.sort_values("오즈비(OR)", ascending=False)
-                            .head(top_k)
-                            .reset_index()
-                            .rename(columns={"index": "변수"})
-                        )
-                
-                        # 텍스트용 반올림
-                        top_or["표시_OR"] = top_or["오즈비(OR)"].round(2)
-                
-                        fig_or = px.bar(
-                            top_or,
-                            x="오즈비(OR)",
-                            y="변수",
-                            orientation="h",
-                            text="표시_OR",
-                            title=f"오즈비(OR) 상위 {top_k} 주요 위험 요인",
-                            color="오즈비(OR)",
-                            color_continuous_scale="Reds",
-                        )
-                
-                        fig_or.update_layout(
-                            xaxis_title="오즈비(OR)",
-                            yaxis_title="",
-                            coloraxis_showscale=False,
-                            margin=dict(l=20, r=20, t=60, b=20),
-                        )
-                        fig_or.update_traces(textposition="outside")
-                
-                        st.plotly_chart(fig_or, use_container_width=True)
-                        st.caption("※ 오즈비(OR) > 1 인 요인 중에서 상위 4–5개만 표시했습니다.")
+                # =============================
+                # 🔍 오즈비(OR) 상위 4–5개 시각화
+                # =============================
+                # OR이 1보다 큰(위험을 높이는) 요인 중에서 상위 5개 선택
+                or_df = odds_df.copy()
+                or_df_pos = or_df[or_df["오즈비(OR)"] > 1]
+            
+                if len(or_df_pos) == 0:
+                    st.info("오즈비가 1을 초과하는 위험 요인이 없어 상위 요인을 시각화할 수 없습니다.")
+                else:
+                    top_k = min(5, len(or_df_pos))
+                    top_or = (
+                        or_df_pos.sort_values("오즈비(OR)", ascending=False)
+                        .head(top_k)
+                        .reset_index()
+                        .rename(columns={"index": "변수"})
+                    )
+            
+                    # 텍스트용 반올림
+                    top_or["표시_OR"] = top_or["오즈비(OR)"].round(2)
+            
+                    fig_or = px.bar(
+                        top_or,
+                        x="오즈비(OR)",
+                        y="변수",
+                        orientation="h",
+                        text="표시_OR",
+                        title=f"오즈비(OR) 상위 {top_k} 주요 위험 요인",
+                        color="오즈비(OR)",
+                        color_continuous_scale="Reds",
+                    )
+            
+                    fig_or.update_layout(
+                        xaxis_title="오즈비(OR)",
+                        yaxis_title="",
+                        coloraxis_showscale=False,
+                        margin=dict(l=20, r=20, t=60, b=20),
+                    )
+                    fig_or.update_traces(textposition="outside")
+            
+                    st.plotly_chart(fig_or, use_container_width=True)
+                    st.caption("※ 오즈비(OR) > 1 인 요인 중에서 상위 4–5개만 표시했습니다.")
 
         else:
             st.warning(
