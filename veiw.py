@@ -110,7 +110,7 @@ def get_br_fq_select_options():
 
 
 def prepare_adult_model_data(df):
-    # ✅ pkl 학습 때 사용한 컬럼 이름 기준
+    # pkl 모델 학습 시 사용한 컬럼 기준
     req = [
         "DIABETES",
         "age",
@@ -134,6 +134,7 @@ def prepare_adult_model_data(df):
     X = data.drop(columns=["DIABETES"])
     X = sm.add_constant(X)
     return {"X": X, "y": y, "columns": X.columns.tolist()}
+
 
 
 def compute_adult_model_results(dataframe: pd.DataFrame, model):
