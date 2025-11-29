@@ -388,7 +388,7 @@ def load_data():
 
 @st.cache_data
 def load_new_data():
-    df_new = pd.read_csv('hn_cleand_data (2).csv')
+    df_new = pd.read_csv('hn_cleand_data.csv')
     # 컬럼명을 기존 데이터와 일치시키기 위해 매핑
     df_new = df_new.rename(columns={
         'year': 'YEAR',
