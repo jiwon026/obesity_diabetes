@@ -194,7 +194,7 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     y_prob = model.predict(X_aligned)
 
     # 3) F1 기준 최적 임계값 탐색
-    best_t, best_f1 = find_best_threshold(y, y_prob, metric="f1")
+    used_t = ADULT_MODEL_THRESHOLD
 
     # 4) 최종 예측
     y_pred = (y_prob >= best_t).astype(int)
@@ -202,11 +202,11 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     # 5) 성능 지표
     metrics = {
         "accuracy": accuracy_score(y, y_pred),
-        "recall": recall_score(y, y_pred, zero_division=0),
-        "precision": precision_score(y, y_pred, zero_division=0),
-        "f1": best_f1,
+        "recall": recall_score(y, y_pred),
+        "precision": precision_score(y, y_pred),
+        "f1": f1_score(y, y_pred),
         "auc": roc_auc_score(y, y_prob),
-        "threshold": float(best_t),
+        "threshold": float(used_t),
         "sample_size": len(y),
     }
 
