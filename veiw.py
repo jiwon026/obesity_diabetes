@@ -30,8 +30,21 @@ ADULT_MODEL_THRESHOLD = 0.1667 # F1 최적화 임계값
 ADULT_DEFAULT_HDL = 53.50 # 평균 HDL-C 값
 
 # ==============================================================================
-# 🧑‍💻 성인 모델 관련 함수
+# 📝 모델 로드 및 준비 함수 (NameError 해결을 위해 여기에 위치)
 # ==============================================================================
+
+def load_teen_model_results_from_file(path: str = "teen_model_results.json"):
+    """
+    미리 계산해 둔 청소년 비만 예측 모델 결과를 파일에서 불러옵니다.
+    """
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception:
+        return None
 
 def classify_adult_obesity(height_cm, weight_kg):
     """요청된 새로운 비만 분류 기준 적용"""
@@ -131,33 +144,41 @@ def compute_adult_model_results(dataframe: pd.DataFrame):
     }
     return results
 
-# ==============================================================================
-# 📝 Streamlit 페이지 및 함수
-# ==============================================================================
+def predict_diabetes_risk_final(age, sex, height_cm, weight_kg, sbp, dbp, dm_fh, br_fq, model, hdl=ADULT_DEFAULT_HDL):
+    """
+    최종 모델을 사용하여 당뇨병 위험을 예측합니다.
+    (hdl은 디폴트 53.50 사용 가능)
+    """
+    
+    # 1. BMI 계산 및 분류
+    bmi, obe_level = classify_adult_obesity(height_cm, weight_kg)
+    
+    # 2. 예측을 위한 DataFrame 생성 (모델의 변수 순서와 일치)
+    new_data = pd.DataFrame({
+        'const': [1], 'age': [age], 'sex': [sex], 'HE_BMI': [bmi],
+        'HE_sbp': [sbp], 'HE_dbp': [dbp], 'HE_HDL_st2': [hdl],
+        'DM_FH': [dm_fh], 'L_BR_FQ': [br_fq], 'BMI_Age_Int': [bmi * age]
+    })
+    
+    # 3. 모델을 사용하여 당뇨병 확률 예측
+    prediction_prob = model.predict(new_data)[0]
 
-# 페이지 설정
-st.set_page_config(
-    page_title="건강 데이터 분석 대시보드",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+    return bmi, obe_level, prediction_prob, hdl
 
-# 한글 폰트 설정
-# Streamlit 환경에서는 폰트 설정이 복잡하므로, Plotly 사용을 기본으로 함
-plt.rcParams['font.family'] = 'AppleGothic'
-plt.rcParams['axes.unicode_minus'] = False
+# ... (prepare_teen_model_data, compute_teen_model_results 함수도 모두 여기에 위치해야 함)
+
+# ==============================================================================
+# 🚀 메인 실행 및 Streamlit 로직
+# ==============================================================================
 
 # 데이터 로드 (캐싱)
-# 기존 df는 청소년 데이터 (9ch_final_data.csv)를 위한 코드이므로 주석 처리하거나 변경
 @st.cache_data
 def load_data():
     try:
         df = pd.read_csv('9ch_final_data.csv')
         df['BMI'] = df['WT'] / ((df['HT'] / 100) ** 2)
     except FileNotFoundError:
-        st.error("청소년 데이터 파일(9ch_final_data.csv)을 찾을 수 없습니다.")
-        df = pd.DataFrame() # 빈 데이터프레임 반환
+        df = pd.DataFrame() 
     return df
 
 @st.cache_data
@@ -166,23 +187,18 @@ def load_new_data():
     try:
         df_new = pd.read_csv('hn_cleand_data.csv')
     except FileNotFoundError:
-        st.error("성인 데이터 파일(hn_cleand_data.csv)을 찾을 수 없습니다.")
         return pd.DataFrame()
         
-    # KNHANES 원본 변수명을 대시보드용 이름으로 매핑
     df_new = df_new.rename(columns={
         'year': 'YEAR', 'age': 'AGE', 'sex': 'SEX', 'region': 'REGION',
         'ho_incm5': 'INCOME', 'HE_ht': 'HT', 'HE_wt': 'WT', 'HE_BMI': 'BMI',
         'HE_obe': 'OBESITY', 'HE_glu': 'GLUCOSE', 'HE_HbA1c': 'HbA1c',
         'DE1_dg': 'DIABETES', 'L_BR_FQ': 'BREAKFAST', 
-        # 성인 모델 필수 변수
         'HE_sbp': 'SBP', 'HE_dbp': 'DBP', 'HE_DMfh1': 'DM_FH1',
         'HE_DMfh2': 'DM_FH2', 'HE_HDL_st2': 'HDL',
-        'LS_FRUIT': 'F_FRUIT', # 식습관 분석용
-        'LS_VEG1': 'F_VEG', # 식습관 분석용 (LS_VEG2 대신 LS_VEG1 사용 가정)
+        'LS_FRUIT': 'F_FRUIT', 'LS_VEG1': 'F_VEG',
     })
     
-    # 🌟 파생 변수 생성 (DM_FH 및 BMI_Age_Int)
     if 'DM_FH1' in df_new.columns and 'DM_FH2' in df_new.columns:
         df_new['DM_FH'] = ((df_new['DM_FH1'] == 1) | (df_new['DM_FH2'] == 1)).astype(int)
     
@@ -191,32 +207,11 @@ def load_new_data():
     
     return df_new
 
-
-# ====== 모델 학습 요약 함수 (청소년 및 성인) ======
-
-def compute_teen_model_summary(dataframe: pd.DataFrame):
-    # 청소년 모델 계산 로직은 변경 없음
-    prep = prepare_teen_model_data(dataframe)
-    if not prep: return None
-    # ... (생략된 기존 청소년 모델 학습 로직)
-    # 임시: 더미 값 반환 (실제 로직은 기존 코드에 포함되어 있으나, 여기서는 생략)
-    return teen_model_summary_global 
-
-
 # 데이터 로드
 df = load_data()
 df_new = load_new_data()
 
-# 전역 변수 설정 (청소년 모델)
-teen_bmi_cutoff = None
-# ... (생략된 기존 청소년 데이터 전처리 로직)
-# 임시: 전역 변수 더미 설정
-if not df.empty and 'BMI' in df.columns and df['BMI'].notna().any():
-    teen_bmi_cutoff = df['BMI'].quantile(TEEN_OBESITY_PERCENTILE)
-    # 나머지 청소년 데이터 전처리는 생략 (기존 코드와 동일)
-
-
-# ⚡️ 모델 결과 불러오기 (실제 앱에서는 파일 로드)
+# ⚠️ NameError 해결 지점: 함수 호출 전에 모든 함수 정의 완료!
 teen_model_results_global = load_teen_model_results_from_file()
 teen_model_summary_global = (teen_model_results_global.get("logistic") if teen_model_results_global else None)
 
