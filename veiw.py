@@ -3,8 +3,6 @@ import os
 import json
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
@@ -25,6 +23,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from imblearn.ensemble import BalancedRandomForestClassifier
 from imblearn.over_sampling import SMOTE
 import statsmodels.api as sm 
+import pickle # 모델 저장/로드 라이브러리 추가
 
 # ====== 전역 상수 ======
 TEEN_EXCLUDED_YEARS = {2015, 2016}
@@ -32,9 +31,10 @@ TEEN_OBESITY_PERCENTILE = 0.95
 TEEN_MODEL_THRESHOLD = 0.49
 ADULT_MODEL_THRESHOLD = 0.1667 # F1 최적화 임계값
 ADULT_DEFAULT_HDL = 53.50 # 평균 HDL-C 값
+MODEL_PATH = 'logit_model.pkl' # 🚨 모델 파일 경로 설정
 
 # ==============================================================================
-# 📝 모델 로드 및 준비 함수
+# 📝 모델 로드 및 준비 함수 (Model Persistence Logic)
 # ==============================================================================
 
 def load_teen_model_results_from_file(path: str = "teen_model_results.json"):
@@ -87,7 +87,6 @@ def get_br_fq_select_options():
 
 def prepare_adult_model_data(dataframe: pd.DataFrame):
     """성인 모델 학습에 필요한 데이터 준비 및 변수 생성"""
-    # ⚠️ BMI_Age_Int (상호작용항) 제외!
     required_cols = [
         "DIABETES", "AGE", "SEX", "BMI", "SBP", "DBP", "HDL", 
         "DM_FH", "BREAKFAST"
@@ -109,7 +108,7 @@ def prepare_adult_model_data(dataframe: pd.DataFrame):
 
 @st.cache_data
 def compute_adult_model_results(dataframe: pd.DataFrame):
-    """최종 로지스틱 회귀 모델 (상호작용항 제외)을 학습하고 결과를 반환"""
+    """최종 로지스틱 회귀 모델의 성능 지표만 계산하고 반환"""
     prep = prepare_adult_model_data(dataframe)
     if not prep:
         return None
@@ -145,6 +144,40 @@ def compute_adult_model_results(dataframe: pd.DataFrame):
     }
     return results
 
+@st.cache_resource
+def train_and_save_model(dataframe: pd.DataFrame):
+    """모델 객체 자체를 캐싱하고 반환 (파일 저장/로드 포함)"""
+    # 1. 파일이 이미 있으면 로드
+    if os.path.exists(MODEL_PATH):
+        try:
+            with open(MODEL_PATH, 'rb') as f:
+                model = pickle.load(f)
+            st.toast("✅ 학습된 모델 파일 로드 완료.", icon='🎉')
+            return model
+        except Exception as e:
+            st.warning(f"모델 파일 로드 실패: {e}. 새로 학습을 시작합니다.")
+
+    # 2. 파일이 없으면 학습 및 저장
+    prep = prepare_adult_model_data(dataframe)
+    if not prep: 
+        st.error("모델 학습을 위한 데이터 준비 실패.")
+        return None
+    
+    X, y = prep["X"], prep["y"]
+    
+    model = sm.Logit(y, X).fit(disp=False)
+    
+    # 모델 저장
+    try:
+        with open(MODEL_PATH, 'wb') as f:
+            pickle.dump(model, f)
+        st.toast(f"✅ 모델 학습 및 '{MODEL_PATH}' 파일 저장 완료.", icon='💾')
+    except Exception as e:
+        st.error(f"모델 파일 저장 실패: {e}. 예측은 가능하나 파일 저장은 안 됨.")
+        
+    return model
+
+
 def predict_diabetes_risk_final(age, sex, height_cm, weight_kg, sbp, dbp, dm_fh, br_fq, model, hdl=ADULT_DEFAULT_HDL):
     """
     최종 간소화 모델 (상호작용항 없음)을 사용하여 당뇨병 위험을 예측합니다.
@@ -154,7 +187,6 @@ def predict_diabetes_risk_final(age, sex, height_cm, weight_kg, sbp, dbp, dm_fh,
     bmi, obe_level = classify_adult_obesity(height_cm, weight_kg)
     
     # 2. 예측을 위한 DataFrame 생성 (모델의 변수 순서와 일치)
-    # ⚠️ BMI_Age_Int 항은 제외됨
     new_data = pd.DataFrame({
         'const': [1], 'AGE': [age], 'SEX': [sex], 'BMI': [bmi],
         'SBP': [sbp], 'DBP': [dbp], 'HDL': [hdl],
@@ -169,19 +201,16 @@ def predict_diabetes_risk_final(age, sex, height_cm, weight_kg, sbp, dbp, dm_fh,
 
 # ⚠️ 청소년 모델 학습 로직은 여기서 생략되었습니다.
 def prepare_teen_model_data(dataframe: pd.DataFrame) -> Optional[Dict[str, np.ndarray]]:
-    # 이 부분은 원래 긴 청소년 모델 준비 코드입니다. 
-    # Streamlit은 이 함수가 정의되어 있어야 전체 코드가 실행됩니다.
     return None 
 
 def compute_teen_model_results(dataframe: pd.DataFrame):
-    # 이 부분은 원래 긴 청소년 모델 계산 코드입니다.
     return None
 
 # ==============================================================================
 # 🚀 메인 실행 및 Streamlit 로직
 # ==============================================================================
 
-# 데이터 로드 (캐싱)
+# 데이터 로드
 @st.cache_data
 def load_data():
     try:
@@ -213,7 +242,7 @@ def load_new_data():
         df_new['DM_FH'] = ((df_new['DM_FH1'] == 1) | (df_new['DM_FH2'] == 1)).astype(int)
     
     if 'BMI' in df_new.columns and 'AGE' in df_new.columns:
-        df_new['BMI_Age_Int'] = df_new['BMI'] * df_new['AGE'] # 분석에는 사용 안 하나 데이터프레임에는 유지
+        df_new['BMI_Age_Int'] = df_new['BMI'] * df_new['AGE']
     
     return df_new
 
@@ -244,15 +273,14 @@ else:
     df['NET_DIET_SCORE'] = np.nan
 
 
-# ⚡️ 모델 결과 불러오기
+# ⚡️ 모델 객체 전역 캐싱 및 성능 계산
+adult_model_results_global = compute_adult_model_results(df_new)
+logit_model = train_and_save_model(df_new) 
+adult_model_summary_global = (adult_model_results_global.get("metrics") if adult_model_results_global else None)
+adult_model_coefs = (adult_model_results_global.get("model_params") if adult_model_results_global else None)
+
 teen_model_results_global = load_teen_model_results_from_file()
 teen_model_summary_global = (teen_model_results_global.get("logistic") if teen_model_results_global else None)
-
-# 성인 모델 결과 계산 (앱 실행 시마다 캐싱)
-adult_model_results_global = compute_adult_model_results(df_new)
-adult_model_summary_global = (adult_model_results_global.get("metrics") if adult_model_results_global else None)
-adult_model_params = (adult_model_results_global.get("model_params") if adult_model_results_global else None)
-adult_model_coefs = (adult_model_results_global.get("model_params") if adult_model_results_global else None)
 
 
 # ==============================================================================
@@ -534,7 +562,7 @@ with tab3:
                 
                 if len(combined_diabetes_data) > 0:
                     fig = px.line(combined_diabetes_data, x='YEAR', y='당뇨발병률', color='성별', markers=True, labels={'YEAR': '연도', '당뇨발병률': '당뇨 발병률 (%)'}, title='연도별 당뇨 발병률 추이 (성별 구분)', color_discrete_map={'전체': 'purple', '남성': '#ff9999', '여성': '#66b3ff'})
-                    fig.update_traces(line_width=3, marker_size=8)
+                    fig.update_traces(line_width=3)
                     fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                     st.plotly_chart(fig, use_container_width=True)
             
@@ -683,11 +711,9 @@ with tab7:
     st.header("🧑‍💻 성인 당뇨병 위험 예측기")
     st.markdown("---")
     
-    if adult_model_coefs is None:
-        st.warning("모델 학습에 필요한 데이터가 부족하여 예측기를 활성화할 수 없습니다.")
+    if logit_model is None:
+        st.warning("모델 학습에 필요한 데이터가 부족하여 예측기를 활성화할 수 없습니다. 데이터 파일을 확인해주세요.")
     else:
-        # 모델 계수를 predict_diabetes_risk_final 함수에 전달하기 위해 model_params를 그대로 사용
-        
         st.subheader("1. 신체 및 인구통계 정보 입력")
         
         col_age, col_sex, col_height, col_weight = st.columns(4)
@@ -735,10 +761,8 @@ with tab7:
         
         if st.button("당뇨병 위험 확률 예측하기", type="primary"):
             try:
-                # HDL 값이 디폴트와 다르면 입력값 사용
                 used_hdl = hdl_input_val if hdl_input_val != ADULT_DEFAULT_HDL else ADULT_DEFAULT_HDL
                 
-                # 예측 실행
                 bmi_result, obe_level_result, prob_result, used_hdl = predict_diabetes_risk_final(
                     age_input, sex_input, height_input, weight_input,
                     sbp_input, dbp_input, dm_fh_input, br_fq_input,
