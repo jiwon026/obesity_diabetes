@@ -87,25 +87,19 @@ def get_br_fq_select_options():
         '거의 안 먹음 (6.0)': 6.0
     }
 
-def prepare_adult_model_data(dataframe: pd.DataFrame):
-    """성인 모델 학습에 필요한 데이터 준비 및 변수 생성"""
-    required_cols = [
-        "DIABETES", "AGE", "SEX", "BMI", "SBP", "DBP", "HDL", 
-        "DM_FH", "BREAKFAST"
-    ]
-    
-    if not set(required_cols).issubset(dataframe.columns):
+def prepare_adult_model_data(df):
+    req = ["DIABETES","AGE","SEX","BMI","SBP","DBP","HDL","DM_FH","BREAKFAST"]
+    if not set(req).issubset(df.columns):
         return None
 
-    data = dataframe[required_cols].dropna().reset_index(drop=True)
+    data = df[req].dropna().reset_index(drop=True)
     if len(data) < 100:
         return None
 
     y = data["DIABETES"].astype(int)
     X = data.drop(columns=["DIABETES"])
-    X = sm.add_constant(X) # 상수항 추가
-    
-    return {"X": X, "y": y, "sample_size": len(data), "columns": X.columns.tolist()}
+    X = sm.add_constant(X)
+    return {"X": X, "y": y, "columns": X.columns.tolist()}
 
 
 @st.cache_data
