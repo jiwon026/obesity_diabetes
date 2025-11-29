@@ -197,7 +197,7 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     best_t, best_f1 = find_best_threshold(y, y_prob, metric="f1")
 
     # 4) 최종 예측
-    y_pred = (y_prob >= used_t).astype(int)
+    y_pred = (y_prob >= best_t).astype(int)
 
     # 5) 성능 지표
     metrics = {
