@@ -136,13 +136,15 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     if not prep:
         return None
 
-    X, y = prep["X"], prep["y"]
+   X, y = prep["X"], prep["y"]
 
-    # 모델이 학습될 때 사용한 변수 순서에 맞게 정렬 (이름 기반 정렬)
-    X_pred = X.loc[:, model.params.index]
+# 1) 모델이 학습될 때 사용한 변수 이름 기준으로 재인덱싱
+#    - pkl 안의 params.index 순서대로 컬럼 배치
+#    - df_new에 없는 변수는 새로 만들고 0으로 채움
+X_pred = X.reindex(columns=model.params.index).fillna(0)
 
-    # 예측
-    y_prob = model.predict(X_pred)
+# 2) 예측
+y_prob = model.predict(X_pred)
     y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
     metrics = {
@@ -190,25 +192,17 @@ def predict_diabetes_risk_final(
     bmi, obe_level = classify_adult_obesity(height_cm, weight_kg)
 
     # 2. 예측을 위한 DataFrame 생성
-    new_data = pd.DataFrame(
-        {
-            "const": [1],
-            "AGE": [age],
-            "SEX": [sex],
-            "BMI": [bmi],
-            "SBP": [sbp],
-            "DBP": [dbp],
-            "HDL": [hdl],
-            "DM_FH": [dm_fh],
-            "BREAKFAST": [br_fq],
-        }
-    )
+    new_data = pd.DataFrame({
+    'const': [1], 'AGE': [age], 'SEX': [sex], 'BMI': [bmi],
+    'SBP': [sbp], 'DBP': [dbp], 'HDL': [hdl],
+    'DM_FH': [dm_fh], 'BREAKFAST': [br_fq]
+})
 
-    # 모델이 학습될 때 사용한 컬럼 순서에 맞게 재정렬
-    new_data = new_data.loc[:, model.params.index]
+# 모델이 학습될 때 사용한 컬럼 기준으로 재인덱싱
+# 없는 컬럼은 0으로 채워서 모양 맞춰줌
+new_data = new_data.reindex(columns=model.params.index).fillna(0)
 
-    # 3. 모델을 사용하여 당뇨병 확률 예측
-    prediction_prob = model.predict(new_data)[0]
+prediction_prob = model.predict(new_data)[0]
 
     return bmi, obe_level, prediction_prob, hdl
 
