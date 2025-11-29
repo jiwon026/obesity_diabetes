@@ -169,7 +169,7 @@ results = {
     "model_params": model.params.to_dict(),
     "model_cols": prep["columns"],
 }
-return results
+    return results
 
 
 def predict_diabetes_risk_final(
