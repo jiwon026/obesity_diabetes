@@ -142,7 +142,7 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     X_pred = X.loc[:, model.params.index]
 
     # 예측
-    y_prob = model.predict(X_pred))
+    y_prob = model.predict(X_pred)
     y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
     metrics = {
