@@ -545,11 +545,13 @@ with tab6:
         if adult_model_summary_global:
             metrics = adult_model_summary_global
             st.markdown(
-                f"- **모델**: Logistic Regression ($\text{BMI} \times \text{Age}$ 상호작용 포함)\n"
-                f"- **라벨 기준**: $\text{DIABETES}=1.0$ (의사 진단 여부)\n"
-                f"- **적용 임계값 (F1 최적화)**: $\mathbf{0.1667}$"
+                f"- **모델**: Logistic Regression (BMI x Age 상호작용 포함)\n" # <-- 이 부분을 수정했습니다.
+                f"- **라벨 기준**: DIABETES=1.0 (의사 진단 여부)\n"
+                f"- **적용 임계값 (F1 최적화)**: **0.1667**"
             )
             
+            # ... (이하 성능 지표 출력 코드는 기존과 동일하게 유지)
+
             metrics_chart = pd.DataFrame({
                 "지표": ["Accuracy", "Recall", "Precision", "F1-Score", "AUC-ROC"],
                 "값": [
@@ -594,7 +596,6 @@ with tab6:
         else:
             st.warning("성인 모델 학습에 필요한 데이터(DIABETES, SBP, HDL 등)가 부족하거나 누락되었습니다.")
     else:
-        # ... (기존 청소년 모델 코드 유지)
         st.info("청소년 모델 성능 분석 코드는 변경 없이 유지됩니다.")
 
 
