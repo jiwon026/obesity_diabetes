@@ -1832,75 +1832,110 @@ with tab6:
                         odds_source = v
                         break
 
-            if odds_source is not None:
-                odds_df = pd.DataFrame(odds_source).T
-
-                # OR 컬럼 이름 찾기 (대소문자 섞여 있어도 대응)
-                or_col = None
-                for c in odds_df.columns:
-                    if str(c).lower() in ["or", "odds", "odds_ratio", "oddsratio"]:
-                        or_col = c
-                        break
-                if or_col is None and "OR" in odds_df.columns:
-                    or_col = "OR"
-
-                if or_col is not None:
-                    # const는 제거
-                    odds_df = odds_df.drop(index="const", errors="ignore")
-
-                    # 상위 5개: |log(OR)| 기준으로 큰 것
-                    odds_df["log_or_abs"] = np.abs(np.log(odds_df[or_col].astype(float)))
-                    top_df = odds_df.sort_values("log_or_abs", ascending=False).head(5)
-
-                    # 보기 좋게 index → 한국어 이름 매핑(필요 시 수정)
-                    name_map = {
-                        "AGE": "나이 (1세당)",
-                        "SEX": "성별 (남=1, 여=2)",
-                        "BMI": "BMI (1kg/m²당)",
-                        "SBP": "수축기 혈압",
-                        "DBP": "이완기 혈압",
-                        "DM_FH": "가족력 (있음)",
-                        "BREAKFAST": "아침식사 빈도",
-                    }
-                    disp_names = [
-                        name_map.get(str(idx), str(idx)) for idx in top_df.index
-                    ]
-
-                    top_or = top_df[or_col].astype(float).values
-
-                    # OR>1은 빨강, OR<1은 파랑
-                    colors = ["#e57373" if v > 1 else "#64b5f6" for v in top_or]
-
-                    fig_or = go.Figure()
-                    fig_or.add_trace(
-                        go.Bar(
-                            x=disp_names,
-                            y=top_or,
-                            marker_color=colors,
-                            text=[
-                                f"{v:.2f}배 증가" if v > 1 else f"{v:.2f}배 감소"
-                                for v in top_or
-                            ],
-                            textposition="outside",
-                        )
-                    )
-                    fig_or.add_hline(
-                        y=1.0,
-                        line_dash="dash",
-                        line_color="gray",
-                        annotation_text="기준선 (OR=1.0)",
-                        annotation_position="top right",
-                    )
-                    fig_or.update_layout(
-                        title="주요 변수별 비만 위험 오즈비 (상위 5개)",
-                        yaxis_title="오즈비 (OR)",
-                        xaxis_title="변수",
-                    )
-                    st.plotly_chart(fig_or, use_container_width=True)
-                else:
-                    st.info("청소년 모델 결과에서 OR(오즈비) 컬럼을 찾지 못했습니다.")
+            if odds_source is None:
+                st.info("청소년 모델 오즈비(odds) 정보가 JSON에 포함되어 있지 않습니다.")
             else:
-                st.info("청소년 모델 오즈비(odds_summary) 정보가 JSON에 포함되어 있지 않습니다.")
+                try:
+                    # odds_source 형태에 따라 DataFrame 생성 방식 분기
+                    if isinstance(odds_source, dict):
+                        # value 중 하나를 샘플로 가져와서 dict 여부 확인
+                        first_val = next(iter(odds_source.values()))
+                        if isinstance(first_val, dict):
+                            # {변수명: {Coef:..., OR:..., P-value:...}} 형태
+                            odds_df = pd.DataFrame(odds_source).T
+                        else:
+                            # {변수명: OR값, ...} 또는 {OR:..., P-value:...} 형태
+                            odds_df = pd.DataFrame([odds_source])
+                    else:
+                        # list 등 예상 밖 구조면 그대로 DF로 시도
+                        odds_df = pd.DataFrame(odds_source)
+
+                except Exception as e:
+                    st.info(f"오즈비 정보를 표로 변환하는 데 실패했습니다: {e}")
+                    odds_df = None
+
+                if odds_df is None or odds_df.empty:
+                    st.info("오즈비(OR) 표 데이터가 비어 있어 시각화할 수 없습니다.")
+                else:
+                    # OR 컬럼 이름 찾기 (대소문자/표기 변형 대응)
+                    or_col = None
+                    for c in odds_df.columns:
+                        cname = str(c).lower()
+                        if cname in ["or", "odds", "odds_ratio", "oddsratio"]:
+                            or_col = c
+                            break
+                    if or_col is None and "OR" in odds_df.columns:
+                        or_col = "OR"
+
+                    if or_col is None:
+                        st.info("오즈비(OR) 컬럼을 찾지 못했습니다.")
+                    else:
+                        # const 행 제거 (있으면)
+                        odds_df = odds_df.drop(index="const", errors="ignore")
+
+                        # 값은 float 로 캐스팅
+                        odds_df[or_col] = odds_df[or_col].astype(float)
+
+                        # 상위 5개: |log(OR)| 기준
+                        odds_df["log_or_abs"] = np.abs(
+                            np.log(odds_df[or_col].replace(0, np.nan))
+                        )
+                        odds_df = odds_df.dropna(subset=["log_or_abs"])
+                        if odds_df.empty:
+                            st.info("오즈비 값이 0 또는 비정상이라 상위 변수를 계산할 수 없습니다.")
+                        else:
+                            top_df = odds_df.sort_values(
+                                "log_or_abs", ascending=False
+                            ).head(5)
+
+                            # 보기 좋게 index → 한글 라벨 매핑 (필요하면 수정)
+                            name_map = {
+                                "AGE": "나이 (1세당)",
+                                "SEX": "성별 (남=1, 여=2)",
+                                "BMI": "BMI (1kg/m²당)",
+                                "SBP": "수축기 혈압",
+                                "DBP": "이완기 혈압",
+                                "DM_FH": "가족력 (있음)",
+                                "BREAKFAST": "아침식사 빈도",
+                            }
+                            disp_names = [
+                                name_map.get(str(idx), str(idx))
+                                for idx in top_df.index
+                            ]
+                            top_or = top_df[or_col].values
+
+                            colors = [
+                                "#e57373" if v > 1 else "#64b5f6" for v in top_or
+                            ]
+                            texts = [
+                                f"위험 {v:.2f}배 증가" if v > 1 else f"위험 {v:.2f}배 감소"
+                                for v in top_or
+                            ]
+
+                            fig_or = go.Figure()
+                            fig_or.add_trace(
+                                go.Bar(
+                                    x=disp_names,
+                                    y=top_or,
+                                    marker_color=colors,
+                                    text=texts,
+                                    textposition="outside",
+                                )
+                            )
+                            fig_or.add_hline(
+                                y=1.0,
+                                line_dash="dash",
+                                line_color="gray",
+                                annotation_text="기준선 (OR=1.0)",
+                                annotation_position="top right",
+                            )
+                            fig_or.update_layout(
+                                title="주요 변수별 비만 위험 오즈비 (상위 5개)",
+                                yaxis_title="오즈비 (OR)",
+                                xaxis_title="변수",
+                            )
+                            st.plotly_chart(fig_or, use_container_width=True)
+
 
 # ---------------- 탭 7: 성인 예측 ----------------
 with tab7:
