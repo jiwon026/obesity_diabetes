@@ -1159,8 +1159,203 @@ with tab3:
                 )
                 fig.update_traces(textposition="inside", textinfo="percent+label")
                 st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("청소년 데이터의 식습관 분석 및 트렌드 시각화 코드는 생략되었습니다.")
+        else:  # 청소년 데이터
+            st.header("🍎 청소년 식습관 및 건강 지표 분석")
+    
+            # -----------------------------------
+            # 1) 과일/채소, 패스트푸드/탄산 섭취 분포
+            # -----------------------------------
+            col1_, col2_ = st.columns(2)
+    
+            with col1_:
+                st.subheader("과일 · 채소 섭취 빈도")
+                fruit = (
+                    filtered_df["F_FRUIT"].dropna()
+                    if "F_FRUIT" in filtered_df.columns
+                    else pd.Series()
+                )
+                veg = (
+                    filtered_df["F_VEG"].dropna()
+                    if "F_VEG" in filtered_df.columns
+                    else pd.Series()
+                )
+    
+                if len(fruit) > 0 or len(veg) > 0:
+                    freq_map = {
+                        1.0: "거의 안 먹음",
+                        2.0: "월 1회",
+                        3.0: "주 1~2회",
+                        4.0: "주 3~4회",
+                        5.0: "거의 매일/매일",
+                    }
+                    df_fv = pd.DataFrame(
+                        {
+                            "코드": list(freq_map.keys()),
+                            "라벨": list(freq_map.values()),
+                        }
+                    )
+    
+                    # 코드 기준으로 count 조인
+                    fruit_counts = fruit.value_counts().reindex(df_fv["코드"]).fillna(0)
+                    veg_counts = veg.value_counts().reindex(df_fv["코드"]).fillna(0)
+                    df_fv["과일 섭취"] = fruit_counts.values
+                    df_fv["채소 섭취"] = veg_counts.values
+    
+                    fig_fv = px.bar(
+                        df_fv,
+                        x="라벨",
+                        y=["과일 섭취", "채소 섭취"],
+                        barmode="group",
+                        labels={"value": "명 수", "라벨": "섭취 빈도"},
+                        title="과일 · 채소 섭취 빈도 분포",
+                    )
+                    fig_fv.update_layout(xaxis_tickangle=-30)
+                    st.plotly_chart(fig_fv, use_container_width=True)
+                else:
+                    st.info("과일/채소 섭취 정보가 부족합니다.")
+    
+            with col2_:
+                st.subheader("패스트푸드 · 탄산 섭취 빈도")
+                ff = (
+                    filtered_df["F_FASTFOOD"].dropna()
+                    if "F_FASTFOOD" in filtered_df.columns
+                    else pd.Series()
+                )
+                soda = (
+                    filtered_df["SODA_INTAKE"].dropna()
+                    if "SODA_INTAKE" in filtered_df.columns
+                    else pd.Series()
+                )
+                if len(ff) > 0 or len(soda) > 0:
+                    freq_map = {
+                        1.0: "거의 안 먹음",
+                        2.0: "월 1회",
+                        3.0: "주 1~2회",
+                        4.0: "주 3~4회",
+                        5.0: "거의 매일/매일",
+                    }
+                    df_us = pd.DataFrame(
+                        {
+                            "코드": list(freq_map.keys()),
+                            "라벨": list(freq_map.values()),
+                        }
+                    )
+                    ff_counts = ff.value_counts().reindex(df_us["코드"]).fillna(0)
+                    soda_counts = soda.value_counts().reindex(df_us["코드"]).fillna(0)
+                    df_us["패스트푸드"] = ff_counts.values
+                    df_us["탄산음료"] = soda_counts.values
+    
+                    fig_us = px.bar(
+                        df_us,
+                        x="라벨",
+                        y=["패스트푸드", "탄산음료"],
+                        barmode="group",
+                        labels={"value": "명 수", "라벨": "섭취 빈도"},
+                        title="패스트푸드 · 탄산음료 섭취 빈도 분포",
+                    )
+                    fig_us.update_layout(xaxis_tickangle=-30)
+                    st.plotly_chart(fig_us, use_container_width=True)
+                else:
+                    st.info("패스트푸드/탄산 섭취 정보가 부족합니다.")
+    
+            st.markdown("---")
+    
+            # -----------------------------------
+            # 2) 건강/불건강 식습관 점수 & BMI/비만도
+            # -----------------------------------
+            col3_, col4_ = st.columns(2)
+    
+            with col3_:
+                st.subheader("건강/불건강 식습관 점수")
+                if (
+                    "HEALTHY_SCORE" in filtered_df.columns
+                    and "UNHEALTHY_SCORE" in filtered_df.columns
+                ):
+                    score_df = filtered_df[["HEALTHY_SCORE", "UNHEALTHY_SCORE"]].dropna()
+                    if len(score_df) > 0:
+                        score_long = score_df.melt(
+                            value_vars=["HEALTHY_SCORE", "UNHEALTHY_SCORE"],
+                            var_name="구분",
+                            value_name="점수",
+                        )
+                        score_long["구분"] = score_long["구분"].map(
+                            {
+                                "HEALTHY_SCORE": "건강 식습관 점수\n(과일+채소)",
+                                "UNHEALTHY_SCORE": "불건강 식습관 점수\n(패스트푸드+탄산)",
+                            }
+                        )
+                        fig_score = px.box(
+                            score_long,
+                            x="구분",
+                            y="점수",
+                            points="all",
+                            title="건강/불건강 식습관 점수 분포",
+                        )
+                        st.plotly_chart(fig_score, use_container_width=True)
+                    else:
+                        st.info("식습관 점수 계산에 필요한 데이터가 부족합니다.")
+                else:
+                    st.info("HEALTHY_SCORE / UNHEALTHY_SCORE 컬럼이 존재하지 않습니다.")
+    
+            with col4_:
+                st.subheader("BMI 및 상위 5% 비만 여부")
+                if "BMI" in filtered_df.columns:
+                    bmi_data = filtered_df["BMI"].dropna()
+                    if len(bmi_data) > 0:
+                        fig_bmi = px.histogram(
+                            bmi_data,
+                            nbins=30,
+                            labels={"value": "BMI", "count": "명 수"},
+                            title="청소년 BMI 분포",
+                            color_discrete_sequence=["#ffccbc"],
+                        )
+                        st.plotly_chart(fig_bmi, use_container_width=True)
+    
+                if "TEEN_OBESE_TOP5" in filtered_df.columns:
+                    obese_counts = (
+                        filtered_df["TEEN_OBESE_TOP5"].dropna().value_counts().sort_index()
+                    )
+                    if len(obese_counts) > 0:
+                        labels = {0.0: "하위 95%", 1.0: "상위 5% (고도 비만군?)"}
+                        fig_ob = px.pie(
+                            values=obese_counts.values,
+                            names=[labels.get(x, str(x)) for x in obese_counts.index],
+                            title="BMI 상위 5% 비만군 비율",
+                            color_discrete_sequence=["#bbdefb", "#ef5350"],
+                        )
+                        fig_ob.update_traces(textposition="inside", textinfo="percent+label")
+                        st.plotly_chart(fig_ob, use_container_width=True)
+    
+            st.markdown("---")
+    
+            # -----------------------------------
+            # 3) 식습관 점수 vs BMI 관계
+            # -----------------------------------
+            st.subheader("식습관 점수와 BMI의 관계")
+    
+            if (
+                "BMI" in filtered_df.columns
+                and "NET_DIET_SCORE" in filtered_df.columns
+            ):
+                rel_df = filtered_df[["BMI", "NET_DIET_SCORE"]].dropna()
+                if len(rel_df) > 0:
+                    fig_sc = px.scatter(
+                        rel_df,
+                        x="NET_DIET_SCORE",
+                        y="BMI",
+                        trendline="ols",
+                        labels={
+                            "NET_DIET_SCORE": "순 식습관 점수 (건강−불건강)",
+                            "BMI": "BMI",
+                        },
+                        title="순 식습관 점수 vs BMI (추세선 포함)",
+                    )
+                    st.plotly_chart(fig_sc, use_container_width=True)
+                else:
+                    st.info("BMI와 NET_DIET_SCORE 정보가 충분하지 않습니다.")
+            else:
+                st.info("BMI 또는 NET_DIET_SCORE 컬럼이 없어 관계 분석을 할 수 없습니다.")
+
 
 # ---------------- 탭 4: 상관관계 ----------------
 with tab4:
