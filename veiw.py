@@ -1090,7 +1090,7 @@ with tab3:
                     xref="paper",
                     yref="paper",
                     xanchor="right",
-                    yanchor="Top",
+                    yanchor="bottom",
                     showarrow=False,
                     text=eq_text,
                     font=dict(size=9),
