@@ -1376,8 +1376,51 @@ with tab4:
                 title="건강 지표 상관관계 히트맵",
             )
             st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("청소년 데이터 상관관계 분석 코드는 생략되었습니다.")
+        else:
+            st.header("청소년 상관관계 분석")
+    
+            if filtered_df.empty:
+                st.info("필터링된 청소년 데이터가 없습니다.")
+            else:
+                # BMI와 식습관 관련 점수들 중심으로 상관관계
+                corr_cols = []
+                for c in ["BMI", "HEALTHY_SCORE", "UNHEALTHY_SCORE", "NET_DIET_SCORE", "WT", "HT"]:
+                    if c in filtered_df.columns:
+                        corr_cols.append(c)
+    
+                if len(corr_cols) < 2:
+                    st.info("상관관계를 계산할 수 있는 연속형 변수가 충분하지 않습니다.")
+                else:
+                    corr_df = filtered_df[corr_cols].dropna()
+                    if len(corr_df) == 0:
+                        st.info("상관관계 분석에 사용할 유효 데이터가 없습니다.")
+                    else:
+                        corr = corr_df.corr()
+    
+                        pretty_names = {
+                            "BMI": "BMI",
+                            "WT": "체중",
+                            "HT": "키",
+                            "HEALTHY_SCORE": "건강 식습관 점수",
+                            "UNHEALTHY_SCORE": "불건강 식습관 점수",
+                            "NET_DIET_SCORE": "순 식습관 점수",
+                        }
+                        xlabels = [pretty_names.get(c, c) for c in corr.columns]
+                        ylabels = [pretty_names.get(c, c) for c in corr.index]
+    
+                        fig_corr = px.imshow(
+                            corr,
+                            x=xlabels,
+                            y=ylabels,
+                            color_continuous_scale="RdBu",
+                            zmin=-1,
+                            zmax=1,
+                            labels=dict(color="상관계수"),
+                            title="청소년 BMI 및 식습관 지표 상관관계 히트맵",
+                        )
+                        fig_corr.update_xaxes(side="bottom")
+                        st.plotly_chart(fig_corr, use_container_width=True)
+
 
 # ---------------- 탭 5: 데이터 ----------------
 with tab5:
