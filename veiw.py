@@ -1708,7 +1708,8 @@ with tab6:
                         y=[0, 1],
                         mode="lines",
                         name="무작위 분류기 (AUC = 0.5)",
-                        line=dict(dash="dash", color="gray"),
+                        line=dict(width=2dash="dash", color="gray"),
+                        showlegend=True,
                     )
                 )
 
