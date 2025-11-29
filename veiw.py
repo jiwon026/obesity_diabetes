@@ -1649,7 +1649,113 @@ with tab6:
                 "성인 모델 학습에 필요한 데이터(DIABETES, SBP, HDL 등)가 부족하거나 누락되었습니다."
             )
     else:
-        st.info("청소년 모델 성능 분석 코드는 생략되었습니다.")
+        # ============================
+        # 👦 청소년 비만 예측 모델 성능
+        # ============================
+        st.header("👦 청소년 비만 예측 모델 성능")
+
+        if teen_model_summary_global is None:
+            st.info(
+                "미리 계산된 청소년 모델 결과 파일(teen_model_results.json)을 "
+                "찾을 수 없거나 'logistic' 결과가 없습니다."
+            )
+        else:
+            # teen_model_summary_global 구조 방어적으로 처리
+            summary = teen_model_summary_global
+
+            # logistic 안에 metrics가 따로 있을 수도 있고,
+            # summary 자체가 metrics일 수도 있어서 둘 다 대응
+            if isinstance(summary, dict) and "metrics" in summary:
+                metrics = summary["metrics"]
+            else:
+                metrics = summary
+
+            # 지표 꺼내기 (없으면 None)
+            acc = metrics.get("accuracy")
+            rec = metrics.get("recall")
+            prec = metrics.get("precision")
+            f1 = metrics.get("f1")
+            auc = (
+                metrics.get("auc")
+                or metrics.get("roc_auc")
+                or metrics.get("auroc")
+            )
+            thr = metrics.get("threshold") or metrics.get("cutoff")
+            n_sample = metrics.get("sample_size")
+
+            st.markdown(
+                """
+                - **모델**: Logistic Regression (청소년 비만 상위 5% 예측용)
+                - **라벨 기준**: BMI 상위 5% (TEEN_OBESE_TOP5 = 1)
+                - **적용 임계값**: {thr:.3f} (F1 기준 최적화)
+                """.format(thr=thr if thr is not None else 0.5)
+            )
+
+            # ── 막대그래프용 데이터프레임 구성 ──
+            rows = []
+            if acc is not None:
+                rows.append({"지표": "Accuracy", "값": acc})
+            if rec is not None:
+                rows.append({"지표": "Recall", "값": rec})
+            if prec is not None:
+                rows.append({"지표": "Precision", "값": prec})
+            if f1 is not None:
+                rows.append({"지표": "F1-Score", "값": f1})
+            if auc is not None:
+                rows.append({"지표": "AUC-ROC", "값": auc})
+
+            if rows:
+                teen_metric_df = pd.DataFrame(rows)
+
+                fig = px.bar(
+                    teen_metric_df,
+                    x="지표",
+                    y="값",
+                    title="청소년 모델 성능 지표",
+                    color="지표",
+                    color_discrete_sequence=px.colors.qualitative.Set2,
+                )
+                fig.update_yaxes(range=[0, 1])
+                st.plotly_chart(fig, use_container_width=True)
+
+            # ── 카드 형태 KPI ──
+            col1, col2, col3 = st.columns(3)
+            if acc is not None:
+                col1.metric("Accuracy", f"{acc*100:.1f}%")
+            if rec is not None:
+                col2.metric("Recall", f"{rec*100:.1f}%")
+            if prec is not None:
+                col3.metric("Precision", f"{prec*100:.1f}%")
+
+            col4, col5 = st.columns(2)
+            if f1 is not None:
+                col4.metric("F1-Score", f"{f1*100:.1f}%")
+            if auc is not None:
+                col5.metric("AUC-ROC", f"{auc:.3f}")
+
+            if n_sample is not None:
+                st.caption(f"학습 표본 수: {int(n_sample):,}건")
+
+            st.markdown("---")
+
+            # ── (옵션) 오즈비 표가 teen_model_summary_global에 같이 들어 있다면 ──
+            odds_source = None
+            if isinstance(summary, dict):
+                odds_source = summary.get("odds_summary")
+            if odds_source is None and isinstance(teen_model_results_global, dict):
+                odds_source = teen_model_results_global.get("odds_summary")
+
+            if odds_source is not None:
+                odds_df = pd.DataFrame(odds_source).T.drop(
+                    "const", errors="ignore"
+                )
+                odds_df = odds_df.rename(
+                    columns={"OR": "오즈비(OR)", "P-value": "p-value"}
+                ).round(4)
+
+                st.subheader("📊 주요 요인 오즈비 (Odds Ratio)")
+                st.dataframe(odds_df, use_container_width=True)
+
 
 # ---------------- 탭 7: 성인 예측 ----------------
 with tab7:
