@@ -193,16 +193,23 @@ def predict_diabetes_risk_final(
 
     # 2. 예측을 위한 DataFrame 생성
     new_data = pd.DataFrame({
-    'const': [1], 'AGE': [age], 'SEX': [sex], 'BMI': [bmi],
-    'SBP': [sbp], 'DBP': [dbp], 'HDL': [hdl],
-    'DM_FH': [dm_fh], 'BREAKFAST': [br_fq]
-})
+        'const': [1],
+        'AGE': [age],
+        'SEX': [sex],
+        'BMI': [bmi],
+        'SBP': [sbp],
+        'DBP': [dbp],
+        'HDL': [hdl],
+        'DM_FH': [dm_fh],
+        'BREAKFAST': [br_fq]
+    })
 
-# 모델이 학습될 때 사용한 컬럼 기준으로 재인덱싱
-# 없는 컬럼은 0으로 채워서 모양 맞춰줌
-new_data = new_data.reindex(columns=model.params.index).fillna(0)
+    # 3. 모델이 학습될 때 사용한 컬럼 기준으로 재인덱싱
+    #    없는 컬럼은 0으로 채워서 모양 맞춰줌
+    new_data = new_data.reindex(columns=model.params.index).fillna(0)
 
-prediction_prob = model.predict(new_data)[0]
+    # 4. 예측
+    prediction_prob = model.predict(new_data)[0]
 
     return bmi, obe_level, prediction_prob, hdl
 
