@@ -58,25 +58,7 @@ def load_teen_model_results_from_file(path: str = "teen_model_results.json"):
         return None
 
 
-def load_saved_logit_model(path: str = MODEL_PATH):
-    """
-    미리 저장된 pkl 파일에서 로지스틱 회귀 모델을 불러옵니다.
-    - pkl에 model만 저장했거나
-    - {"model": model, "columns": [...]} 형태로 저장했을 때 둘 다 대응
-    """
-    if not os.path.exists(path):
-        print(f"[WARN] 모델 파일을 찾을 수 없습니다: {path}")
-        return None
 
-    with open(path, "rb") as f:
-        obj = pickle.load(f)
-
-    # {"model": ..., "columns": ...} 형태로 저장한 경우
-    if isinstance(obj, dict) and "model" in obj:
-        return obj["model"]
-
-    # 그냥 모델 객체만 저장한 경우
-    return obj
 
 
 def classify_adult_obesity(height_cm, weight_kg):
