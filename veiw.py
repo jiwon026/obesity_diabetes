@@ -150,9 +150,9 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
 
     X, y = prep["X"], prep["y"]
 
-    # 🔥 모델이 학습될 때 사용한 변수 순서에 정확히 맞추기
-    #    (이거 안 맞으면 지금처럼 AUC가 박살남)
-    X_aligned = X.reindex(columns=model.params.index)
+    # 🔥 모델이 학습될 때 사용한 변수 순서에 맞추고,
+    #    없는 컬럼이 생기면 0으로 채워서 NaN이 안 생기게 함
+    X_aligned = X.reindex(columns=model.params.index).fillna(0)
 
     # 예측
     y_prob = model.predict(X_aligned)
@@ -167,6 +167,7 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
         "threshold": ADULT_MODEL_THRESHOLD,
         "sample_size": len(y),
     }
+
 
     odds_ratios = np.exp(model.params)
     coef_df = pd.DataFrame(
@@ -219,7 +220,7 @@ def predict_diabetes_risk_final(
     })
 
     # 3. 모델이 가진 파라미터 순서에 맞추기
-    new_data = new_data.reindex(columns=model.params.index)
+    new_data = new_data.reindex(columns=model.params.index).fillna(0)
 
     # 4. 예측
     prediction_prob = model.predict(new_data)[0]
