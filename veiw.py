@@ -136,40 +136,53 @@ def compute_adult_model_results(dataframe: pd.DataFrame, model):
     if not prep:
         return None
 
-X, y = prep["X"], prep["y"]
+    # -----------------------------
+    # ① 데이터 준비
+    # -----------------------------
+    X, y = prep["X"], prep["y"]
 
-# 1) 모델이 학습될 때 사용한 변수 이름 기준으로 재인덱싱
-#    - pkl 안의 params.index 순서대로 컬럼 배치
-#    - df_new에 없는 변수는 새로 만들고 0으로 채움
-X_pred = X.reindex(columns=model.params.index).fillna(0)
+    # 모델이 학습될 때 사용한 변수 기준으로 재인덱싱
+    X_pred = X.reindex(columns=model.params.index).fillna(0)
 
-# 2) 예측
-y_prob = model.predict(X_pred)
-y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
+    # -----------------------------
+    # ② 예측
+    # -----------------------------
+    y_prob = model.predict(X_pred)
+    y_pred = (y_prob >= ADULT_MODEL_THRESHOLD).astype(int)
 
-metrics = {
-    "accuracy": accuracy_score(y, y_pred),
-    "recall": recall_score(y, y_pred, zero_division=0),
-    "precision": precision_score(y, y_pred, zero_division=0),
-    "f1": f1_score(y, y_pred),
-    "auc": roc_auc_score(y, y_prob),
-    "threshold": ADULT_MODEL_THRESHOLD,
-    "sample_size": len(y),
-}
+    # -----------------------------
+    # ③ 성능 계산
+    # -----------------------------
+    metrics = {
+        "accuracy": accuracy_score(y, y_pred),
+        "recall": recall_score(y, y_pred, zero_division=0),
+        "precision": precision_score(y, y_pred, zero_division=0),
+        "f1": f1_score(y, y_pred),
+        "auc": roc_auc_score(y, y_prob),
+        "threshold": ADULT_MODEL_THRESHOLD,
+        "sample_size": len(y),
+    }
 
-# 오즈비 및 계수 (로드된 모델 기준)
-odds_ratios = np.exp(model.params)
-coef_df = pd.DataFrame(
-    {"Coef": model.params, "OR": odds_ratios, "P-value": model.pvalues}
-)
+    # -----------------------------
+    # ④ 오즈비 계산
+    # -----------------------------
+    odds_ratios = np.exp(model.params)
+    coef_df = pd.DataFrame(
+        {"Coef": model.params, "OR": odds_ratios, "P-value": model.pvalues}
+    )
 
-results = {
-    "metrics": metrics,
-    "odds_summary": coef_df.to_dict("index"),
-    "model_params": model.params.to_dict(),
-    "model_cols": prep["columns"],
-}
+    # -----------------------------
+    # ⑤ 결과 패키징
+    # -----------------------------
+    results = {
+        "metrics": metrics,
+        "odds_summary": coef_df.to_dict("index"),
+        "model_params": model.params.to_dict(),
+        "model_cols": prep["columns"],
+    }
+
     return results
+
 
 
 def predict_diabetes_risk_final(
