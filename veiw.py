@@ -1189,10 +1189,10 @@ with tab3:
         # -----------------------------------
         # 2) 건강/불건강 식습관 점수 & BMI/비만도
         # -----------------------------------
-        col3_ = st.columns(2)
+        col4_ = st.columns(2)
 
 
-        with col3_:
+        with col4_:
             st.subheader("BMI 및 상위 5% 비만 여부")
             if "BMI" in filtered_df.columns:
                 bmi_data = filtered_df["BMI"].dropna()
