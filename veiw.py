@@ -487,10 +487,10 @@ if not filtered_df.empty:
             (filtered_df["AGE"] >= age_range[0])
             & (filtered_df["AGE"] <= age_range[1])
         ]
-    if selected_sex == "남성":
-        filtered_df = filtered_df[filtered_df["SEX"] == 1.0]
-    elif selected_sex == "여성":
-        filtered_df = filtered_df[filtered_df["SEX"] == 2.0]
+    #if selected_sex == "남성":
+        #filtered_df = filtered_df[filtered_df["SEX"] == 1.0]
+    #elif selected_sex == "여성":
+        #filtered_df = filtered_df[filtered_df["SEX"] == 2.0]
 else:
     filtered_df = pd.DataFrame()
 
