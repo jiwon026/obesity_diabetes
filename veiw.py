@@ -551,6 +551,7 @@ else:
 
 tabs = st.tabs(tab_names)
 
+# 공통 1~6번 탭
 tab1 = tabs[0]
 tab2 = tabs[1]
 tab3 = tabs[2]
@@ -558,9 +559,8 @@ tab4 = tabs[3]
 tab5 = tabs[4]
 tab6 = tabs[5]
 
-# 성인 모드일 때만 7번째 탭 존재
-if is_adult:
-    tab7 = tabs[6]
+# 성인일 때만 tab7 존재
+tab7 = tabs[6] if is_adult else None
 
 # ---------------- 탭 1: 개요 ----------------
 with tab1:
@@ -1716,125 +1716,126 @@ with tab6:
 
 
 # ---------------- 탭 7: 성인 예측 ----------------
-with tab7:
-    st.header("🧑‍💻 성인 당뇨병 위험 예측기")
-    st.markdown("---")
-
-    if logit_model is None:
-        st.warning(
-            "모델 학습에 필요한 데이터가 부족하거나 pkl 로드에 실패하여 예측기를 사용할 수 없습니다."
-        )
-    else:
-        st.subheader("1. 신체 및 인구통계 정보 입력")
-        ca, cs, ch, cw = st.columns(4)
-        with ca:
-            age_input = st.slider("나이 (세)", min_value=19, max_value=100, value=45)
-        with cs:
-            sex_label = st.selectbox(
-                "성별", options=["남성 (1.0)", "여성 (2.0)"], index=0
-            )
-            sex_input = 1.0 if "남성" in sex_label else 2.0
-        with ch:
-            height_input = st.number_input(
-                "키 (cm)", min_value=100.0, max_value=250.0, value=170.0, step=0.1
-            )
-        with cw:
-            weight_input = st.number_input(
-                "몸무게 (kg)", min_value=30.0, max_value=200.0, value=75.0, step=0.1
-            )
-
-        bmi_current, obe_level_current = classify_adult_obesity(
-            height_input, weight_input
-        )
-        bmi_label_map = {
-            1.0: "저체중",
-            2.0: "정상",
-            3.0: "비만전단계",
-            4.0: "1단계 비만",
-            5.0: "2단계 비만 이상",
-        }
-        st.info(
-            f"계산된 BMI: **{bmi_current:.2f} kg/m²** "
-            f"(분류: **{bmi_label_map.get(obe_level_current, '미분류')}**)"
-        )
-
-        st.subheader("2. 건강 지표 및 생활 습관 입력")
-        csbp, cdbp, chdl, cfh = st.columns(4)
-        with csbp:
-            sbp_input = st.number_input(
-                "수축기 혈압 (SBP)", min_value=80.0, max_value=200.0, value=120.0, step=1.0
-            )
-        with cdbp:
-            dbp_input = st.number_input(
-                "이완기 혈압 (DBP)", min_value=50.0, max_value=120.0, value=80.0, step=1.0
-            )
-        with chdl:
-            hdl_input_val = st.number_input(
-                f"HDL-C (mg/dL) (생략 시 {ADULT_DEFAULT_HDL:.1f})",
-                min_value=10.0,
-                max_value=100.0,
-                value=ADULT_DEFAULT_HDL,
-                step=1.0,
-            )
-        with cfh:
-            dm_fh_label = st.selectbox(
-                "당뇨병 가족력", options=["없음 (0)", "있음 (1)"], index=0
-            )
-            dm_fh_input = 1 if "있음" in dm_fh_label else 0
-
-        br_options = get_br_fq_select_options()
-        br_label = st.selectbox("아침 식사 빈도", options=list(br_options.keys()), index=0)
-        br_fq_input = br_options[br_label]
-
+if is_adult and tab7 is not None:
+    with tab7:
+        st.header("🧑‍💻 성인 당뇨병 위험 예측기")
         st.markdown("---")
-        if st.button("당뇨병 위험 확률 예측하기", type="primary"):
-            try:
-                used_hdl = (
-                    hdl_input_val
-                    if hdl_input_val != ADULT_DEFAULT_HDL
-                    else ADULT_DEFAULT_HDL
+    
+        if logit_model is None:
+            st.warning(
+                "모델 학습에 필요한 데이터가 부족하거나 pkl 로드에 실패하여 예측기를 사용할 수 없습니다."
+            )
+        else:
+            st.subheader("1. 신체 및 인구통계 정보 입력")
+            ca, cs, ch, cw = st.columns(4)
+            with ca:
+                age_input = st.slider("나이 (세)", min_value=19, max_value=100, value=45)
+            with cs:
+                sex_label = st.selectbox(
+                    "성별", options=["남성 (1.0)", "여성 (2.0)"], index=0
                 )
-                bmi_res, obe_res, prob_res, used_hdl = predict_diabetes_risk_final(
-                    age_input,
-                    sex_input,
-                    height_input,
-                    weight_input,
-                    sbp_input,
-                    dbp_input,
-                    dm_fh_input,
-                    br_fq_input,
-                    logit_model,
-                    hdl=used_hdl,
+                sex_input = 1.0 if "남성" in sex_label else 2.0
+            with ch:
+                height_input = st.number_input(
+                    "키 (cm)", min_value=100.0, max_value=250.0, value=170.0, step=0.1
                 )
-                st.subheader("🔮 예측 결과")
-                cp, cr = st.columns(2)
-                with cp:
-                    st.metric("예측된 당뇨병 발병 확률", f"{prob_res * 100:.2f}%")
-
-                risk_status = "❌ 위험군 아님"
-                risk_color = "green"
-                if prob_res >= ADULT_MODEL_THRESHOLD:
-                    risk_status = "✅ 고위험군 (추가 검사 권고)"
-                    risk_color = "red"
-                with cr:
-                    st.markdown(
-                        f"<p style='font-size: 24px; color:{risk_color};'><b>{risk_status}</b></p>",
-                        unsafe_allow_html=True,
+            with cw:
+                weight_input = st.number_input(
+                    "몸무게 (kg)", min_value=30.0, max_value=200.0, value=75.0, step=0.1
+                )
+    
+            bmi_current, obe_level_current = classify_adult_obesity(
+                height_input, weight_input
+            )
+            bmi_label_map = {
+                1.0: "저체중",
+                2.0: "정상",
+                3.0: "비만전단계",
+                4.0: "1단계 비만",
+                5.0: "2단계 비만 이상",
+            }
+            st.info(
+                f"계산된 BMI: **{bmi_current:.2f} kg/m²** "
+                f"(분류: **{bmi_label_map.get(obe_level_current, '미분류')}**)"
+            )
+    
+            st.subheader("2. 건강 지표 및 생활 습관 입력")
+            csbp, cdbp, chdl, cfh = st.columns(4)
+            with csbp:
+                sbp_input = st.number_input(
+                    "수축기 혈압 (SBP)", min_value=80.0, max_value=200.0, value=120.0, step=1.0
+                )
+            with cdbp:
+                dbp_input = st.number_input(
+                    "이완기 혈압 (DBP)", min_value=50.0, max_value=120.0, value=80.0, step=1.0
+                )
+            with chdl:
+                hdl_input_val = st.number_input(
+                    f"HDL-C (mg/dL) (생략 시 {ADULT_DEFAULT_HDL:.1f})",
+                    min_value=10.0,
+                    max_value=100.0,
+                    value=ADULT_DEFAULT_HDL,
+                    step=1.0,
+                )
+            with cfh:
+                dm_fh_label = st.selectbox(
+                    "당뇨병 가족력", options=["없음 (0)", "있음 (1)"], index=0
+                )
+                dm_fh_input = 1 if "있음" in dm_fh_label else 0
+    
+            br_options = get_br_fq_select_options()
+            br_label = st.selectbox("아침 식사 빈도", options=list(br_options.keys()), index=0)
+            br_fq_input = br_options[br_label]
+    
+            st.markdown("---")
+            if st.button("당뇨병 위험 확률 예측하기", type="primary"):
+                try:
+                    used_hdl = (
+                        hdl_input_val
+                        if hdl_input_val != ADULT_DEFAULT_HDL
+                        else ADULT_DEFAULT_HDL
                     )
-
-                st.markdown("---")
-                st.markdown("#### 입력 데이터 요약")
-                st.markdown(
-                    f"""
-                - **계산된 BMI:** {bmi_res:.2f} kg/m² ({bmi_label_map.get(obe_res, '미분류')})
-                - **가족력:** {'있음' if dm_fh_input == 1 else '없음'}
-                - **HDL-C:** {used_hdl:.2f} mg/dL
-                - **아침 식사 빈도:** {get_br_fq_label(br_fq_input)}
-                - **현재 사용 중인 분류 임계값:** {ADULT_MODEL_THRESHOLD:.4f}
-                """
-                )
-            except Exception as e:
-                st.error(f"예측 중 오류가 발생했습니다: {e}")
+                    bmi_res, obe_res, prob_res, used_hdl = predict_diabetes_risk_final(
+                        age_input,
+                        sex_input,
+                        height_input,
+                        weight_input,
+                        sbp_input,
+                        dbp_input,
+                        dm_fh_input,
+                        br_fq_input,
+                        logit_model,
+                        hdl=used_hdl,
+                    )
+                    st.subheader("🔮 예측 결과")
+                    cp, cr = st.columns(2)
+                    with cp:
+                        st.metric("예측된 당뇨병 발병 확률", f"{prob_res * 100:.2f}%")
+    
+                    risk_status = "❌ 위험군 아님"
+                    risk_color = "green"
+                    if prob_res >= ADULT_MODEL_THRESHOLD:
+                        risk_status = "✅ 고위험군 (추가 검사 권고)"
+                        risk_color = "red"
+                    with cr:
+                        st.markdown(
+                            f"<p style='font-size: 24px; color:{risk_color};'><b>{risk_status}</b></p>",
+                            unsafe_allow_html=True,
+                        )
+    
+                    st.markdown("---")
+                    st.markdown("#### 입력 데이터 요약")
+                    st.markdown(
+                        f"""
+                    - **계산된 BMI:** {bmi_res:.2f} kg/m² ({bmi_label_map.get(obe_res, '미분류')})
+                    - **가족력:** {'있음' if dm_fh_input == 1 else '없음'}
+                    - **HDL-C:** {used_hdl:.2f} mg/dL
+                    - **아침 식사 빈도:** {get_br_fq_label(br_fq_input)}
+                    - **현재 사용 중인 분류 임계값:** {ADULT_MODEL_THRESHOLD:.4f}
+                    """
+                    )
+                except Exception as e:
+                    st.error(f"예측 중 오류가 발생했습니다: {e}")
 
 # 사이드바 하단 정보
 st.sidebar.markdown("---")
