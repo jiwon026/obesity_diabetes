@@ -458,8 +458,7 @@ st.sidebar.header("🔍 필터 옵션")
 years = sorted(current_df["YEAR"].unique()) if "YEAR" in current_df.columns else []
 selected_years = st.sidebar.multiselect("연도 선택", options=years, default=years)
 
-sex_options = ["전체", "남성", "여성"]
-selected_sex = st.sidebar.selectbox("성별 선택", sex_options)
+
 
 min_age = (
     int(current_df["AGE"].min())
