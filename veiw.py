@@ -1189,41 +1189,10 @@ with tab3:
         # -----------------------------------
         # 2) 건강/불건강 식습관 점수 & BMI/비만도
         # -----------------------------------
-        col3_, col4_ = st.columns(2)
+        col3_ = st.columns(2)
+
 
         with col3_:
-            st.subheader("건강/불건강 식습관 점수")
-            if (
-                "HEALTHY_SCORE" in filtered_df.columns
-                and "UNHEALTHY_SCORE" in filtered_df.columns
-            ):
-                score_df = filtered_df[["HEALTHY_SCORE", "UNHEALTHY_SCORE"]].dropna()
-                if len(score_df) > 0:
-                    score_long = score_df.melt(
-                        value_vars=["HEALTHY_SCORE", "UNHEALTHY_SCORE"],
-                        var_name="구분",
-                        value_name="점수",
-                    )
-                    score_long["구분"] = score_long["구분"].map(
-                        {
-                            "HEALTHY_SCORE": "건강 식습관 점수\n(과일+채소)",
-                            "UNHEALTHY_SCORE": "불건강 식습관 점수\n(패스트푸드+탄산)",
-                        }
-                    )
-                    fig_score = px.box(
-                        score_long,
-                        x="구분",
-                        y="점수",
-                        points="outliers",
-                        title="건강/불건강 식습관 점수 분포",
-                    )
-                    st.plotly_chart(fig_score, use_container_width=True)
-                else:
-                    st.info("식습관 점수 계산에 필요한 데이터가 부족합니다.")
-            else:
-                st.info("HEALTHY_SCORE / UNHEALTHY_SCORE 컬럼이 존재하지 않습니다.")
-
-        with col4_:
             st.subheader("BMI 및 상위 5% 비만 여부")
             if "BMI" in filtered_df.columns:
                 bmi_data = filtered_df["BMI"].dropna()
@@ -1254,37 +1223,7 @@ with tab3:
 
         st.markdown("---")
 
-        # -----------------------------------
-        # 3) 식습관 점수 vs BMI 관계
-        # -----------------------------------
-        st.subheader("식습관 점수와 BMI의 관계")
-
-        if (
-            "BMI" in filtered_df.columns
-            and "NET_DIET_SCORE" in filtered_df.columns
-        ):
-            rel_df = filtered_df[["BMI", "NET_DIET_SCORE"]].dropna()
-            if len(rel_df) > 0:
-                if len(rel_df) > 5000:
-                    rel_df = rel_df.sample(5000, random_state=42)
-                fig_sc = px.scatter(
-                    rel_df,
-                    x="NET_DIET_SCORE",
-                    y="BMI",
-                    trendline="ols",
-                    labels={
-                        "NET_DIET_SCORE": "순 식습관 점수 (건강−불건강)",
-                        "BMI": "BMI",
-                    },
-                    title="순 식습관 점수 vs BMI (추세선 포함)",
-                )
-                st.plotly_chart(fig_sc, use_container_width=True)
-            else:
-                st.info("BMI와 NET_DIET_SCORE 정보가 충분하지 않습니다.")
-        else:
-            st.info("BMI 또는 NET_DIET_SCORE 컬럼이 없어 관계 분석을 할 수 없습니다.")
-
-
+        
 # ---------------- 탭 4: 상관관계 ----------------
 with tab4:
     st.header("상관관계 분석")
