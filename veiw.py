@@ -1191,18 +1191,6 @@ with tab3:
         # -----------------------------------
         st.subheader("BMI 및 상위 5% 비만 여부")
         
-        # BMI 히스토그램
-        if "BMI" in filtered_df.columns:
-            bmi_data = filtered_df["BMI"].dropna()
-            if len(bmi_data) > 0:
-                fig_bmi = px.histogram(
-                    bmi_data,
-                    nbins=30,
-                    labels={"value": "BMI", "count": "명 수"},
-                    title="청소년 BMI 분포",
-                    color_discrete_sequence=["#ffccbc"],
-                )
-                st.plotly_chart(fig_bmi, use_container_width=True)
         
         # 상위 5% 비만 여부 파이차트
         if "TEEN_OBESE_TOP5" in filtered_df.columns:
