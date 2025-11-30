@@ -674,75 +674,7 @@ with tab2:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    col3_, col4_ = st.columns(2)
-    with col3_:
-        year_height = (
-            filtered_df.groupby("YEAR")["HT"].mean().dropna()
-            if "YEAR" in filtered_df.columns and "HT" in filtered_df.columns
-            else pd.Series()
-        )
-        if len(year_height) > 0:
-            fig = px.line(
-                x=year_height.index,
-                y=year_height.values,
-                markers=True,
-                labels={"x": "연도", "y": "평균 키 (cm)"},
-                title="연도별 평균 키 추이",
-            )
-            fig.update_traces(line_color="blue", line_width=3)
-            st.plotly_chart(fig, use_container_width=True)
-    with col4_:
-        year_weight = (
-            filtered_df.groupby("YEAR")["WT"].mean().dropna()
-            if "YEAR" in filtered_df.columns and "WT" in filtered_df.columns
-            else pd.Series()
-        )
-        if len(year_weight) > 0:
-            fig = px.line(
-                x=year_weight.index,
-                y=year_weight.values,
-                markers=True,
-                labels={"x": "연도", "y": "평균 몸무게 (kg)"},
-                title="연도별 평균 몸무게 추이",
-            )
-            fig.update_traces(line_color="red", line_width=3)
-            st.plotly_chart(fig, use_container_width=True)
-
-    col5_, col6_ = st.columns(2)
-    with col5_:
-        sex_height = (
-            filtered_df.groupby("SEX")["HT"].mean().dropna()
-            if "SEX" in filtered_df.columns and "HT" in filtered_df.columns
-            else pd.Series()
-        )
-        if len(sex_height) > 0:
-            sex_labels_bar = ["남성", "여성"]
-            fig = px.bar(
-                x=sex_labels_bar[: len(sex_height)],
-                y=sex_height.values,
-                labels={"x": "성별", "y": "평균 키 (cm)"},
-                title="성별 평균 키 비교",
-                color=sex_labels_bar[: len(sex_height)],
-                color_discrete_sequence=["#ff9999", "#66b3ff"],
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    with col6_:
-        sex_weight = (
-            filtered_df.groupby("SEX")["WT"].mean().dropna()
-            if "SEX" in filtered_df.columns and "WT" in filtered_df.columns
-            else pd.Series()
-        )
-        if len(sex_weight) > 0:
-            sex_labels_bar = ["남성", "여성"]
-            fig = px.bar(
-                x=sex_labels_bar[: len(sex_weight)],
-                y=sex_weight.values,
-                labels={"x": "성별", "y": "평균 몸무게 (kg)"},
-                title="성별 평균 몸무게 비교",
-                color=sex_labels_bar[: len(sex_weight)],
-                color_discrete_sequence=["#ff9999", "#66b3ff"],
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    
 
     bmi_data = (
         filtered_df["BMI"].dropna()
