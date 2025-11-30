@@ -5,8 +5,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from sklearn.metrics import (
@@ -662,6 +660,8 @@ with tab2:
         how="any", axis=0
     ) if set(["HT", "WT", "AGE", "SEX", "YEAR"]).issubset(filtered_df.columns) else pd.DataFrame()
     if not scatter_df.empty:
+        if len(scatter_df) > 5000:
+            scatter_df = scatter_df.sample(5000, random_state=42)
         fig = px.scatter(
             scatter_df,
             x="HT",
@@ -1283,7 +1283,7 @@ with tab3:
                         score_long,
                         x="구분",
                         y="점수",
-                        points="all",
+                        points="outliers",
                         title="건강/불건강 식습관 점수 분포",
                     )
                     st.plotly_chart(fig_score, use_container_width=True)
@@ -1334,6 +1334,8 @@ with tab3:
         ):
             rel_df = filtered_df[["BMI", "NET_DIET_SCORE"]].dropna()
             if len(rel_df) > 0:
+                if len(rel_df) > 5000:
+                    rel_df = rel_df.sample(5000, random_state=42)
                 fig_sc = px.scatter(
                     rel_df,
                     x="NET_DIET_SCORE",
@@ -1360,6 +1362,8 @@ with tab4:
         health_cols = [c for c in health_cols if c in filtered_df.columns]
         hdata = filtered_df[health_cols].dropna()
         if len(hdata) > 0:
+            if len(hdata) > 5000:
+                hdata = hdata.sample(5000, random_state=42)
             corr = hdata.corr()
             fig = px.imshow(
                 corr,
@@ -1388,7 +1392,8 @@ with tab4:
             else:
                 corr_df = filtered_df[corr_cols].dropna()
                 if len(corr_df) == 0:
-                    st.info("상관관계 분석에 사용할 유효 데이터가 없습니다.")
+                    if len(hdata) > 5000:
+                        hdata = hdata.sample(5000, random_state=42)
                 else:
                     corr = corr_df.corr()
 
@@ -1461,7 +1466,12 @@ with tab5:
 
     st.markdown("---")
     st.subheader("필터링된 데이터")
-    st.dataframe(filtered_df, use_container_width=True)
+    max_rows = 2000
+    if len(filtered_df) > max_rows:
+        st.caption(f"⚠ 행이 {len(filtered_df):,}개라서 상위 {max_rows:,}행만 표시합니다.")
+        st.dataframe(filtered_df.head(max_rows), use_container_width=True)
+    else:
+        st.dataframe(filtered_df, use_container_width=True)
 
 # ---------------- 탭 6: 모델 성능 ----------------
 with tab6:
