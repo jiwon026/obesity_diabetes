@@ -1187,40 +1187,39 @@ with tab3:
         st.markdown("---")
 
         # -----------------------------------
-        # 2) 건강/불건강 식습관 점수 & BMI/비만도
+        # 2) BMI/비만도만 사용
         # -----------------------------------
-        col4_ = st.columns(2)
-
-
-        with col4_:
-            st.subheader("BMI 및 상위 5% 비만 여부")
-            if "BMI" in filtered_df.columns:
-                bmi_data = filtered_df["BMI"].dropna()
-                if len(bmi_data) > 0:
-                    fig_bmi = px.histogram(
-                        bmi_data,
-                        nbins=30,
-                        labels={"value": "BMI", "count": "명 수"},
-                        title="청소년 BMI 분포",
-                        color_discrete_sequence=["#ffccbc"],
-                    )
-                    st.plotly_chart(fig_bmi, use_container_width=True)
-
-            if "TEEN_OBESE_TOP5" in filtered_df.columns:
-                obese_counts = (
-                    filtered_df["TEEN_OBESE_TOP5"].dropna().value_counts().sort_index()
+        st.subheader("BMI 및 상위 5% 비만 여부")
+        
+        # BMI 히스토그램
+        if "BMI" in filtered_df.columns:
+            bmi_data = filtered_df["BMI"].dropna()
+            if len(bmi_data) > 0:
+                fig_bmi = px.histogram(
+                    bmi_data,
+                    nbins=30,
+                    labels={"value": "BMI", "count": "명 수"},
+                    title="청소년 BMI 분포",
+                    color_discrete_sequence=["#ffccbc"],
                 )
-                if len(obese_counts) > 0:
-                    labels = {0.0: "하위 95%", 1.0: "상위 5% (고도 비만군?)"}
-                    fig_ob = px.pie(
-                        values=obese_counts.values,
-                        names=[labels.get(x, str(x)) for x in obese_counts.index],
-                        title="BMI 상위 5% 비만군 비율",
-                        color_discrete_sequence=["#bbdefb", "#ef5350"],
-                    )
-                    fig_ob.update_traces(textposition="inside", textinfo="percent+label")
-                    st.plotly_chart(fig_ob, use_container_width=True)
-
+                st.plotly_chart(fig_bmi, use_container_width=True)
+        
+        # 상위 5% 비만 여부 파이차트
+        if "TEEN_OBESE_TOP5" in filtered_df.columns:
+            obese_counts = (
+                filtered_df["TEEN_OBESE_TOP5"].dropna().value_counts().sort_index()
+            )
+            if len(obese_counts) > 0:
+                labels = {0.0: "하위 95%", 1.0: "상위 5% (고도 비만군?)"}
+                fig_ob = px.pie(
+                    values=obese_counts.values,
+                    names=[labels.get(x, str(x)) for x in obese_counts.index],
+                    title="BMI 상위 5% 비만군 비율",
+                    color_discrete_sequence=["#bbdefb", "#ef5350"],
+                )
+                fig_ob.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig_ob, use_container_width=True)
+        
         st.markdown("---")
 
         
